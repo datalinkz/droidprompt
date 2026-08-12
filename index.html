@@ -309,6 +309,7 @@
                     <div>
                         <label class="block text-sm font-medium mb-1">API Endpoint URL</label>
                         <input type="text" id="setting-url" placeholder="cth: https://api.openai.com/v1/chat/completions" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Masukkan URL lengkap termasuk <code class="bg-gray-700 px-1 rounded">/chat/completions</code></p>
                     </div>
                     
                     <div>
@@ -319,6 +320,7 @@
                     <div>
                         <label class="block text-sm font-medium mb-1">Nama Model</label>
                         <input type="text" id="setting-model" placeholder="cth: gpt-3.5-turbo atau llama3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Model tersedia di rootsys.cloud: kimi-k3, glm-5.2, deepseek-v4-pro, dll.</p>
                     </div>
 
                     <div>
@@ -826,10 +828,20 @@ helloWorld();
         }
 
         function saveSettings() {
-            localStorage.setItem('omnicode-url', document.getElementById('setting-url').value);
-            localStorage.setItem('omnicode-key', document.getElementById('setting-key').value);
-            localStorage.setItem('omnicode-model', document.getElementById('setting-model').value);
-            localStorage.setItem('omnicode-prompt', document.getElementById('setting-prompt').value);
+            let url = document.getElementById('setting-url').value.trim();
+            const key = document.getElementById('setting-key').value.trim();
+            const model = document.getElementById('setting-model').value.trim();
+            const prompt = document.getElementById('setting-prompt').value.trim();
+            
+            // Auto-append /chat/completions if not present and URL ends with /v1
+            if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
+                url = url + '/chat/completions';
+            }
+            
+            localStorage.setItem('omnicode-url', url);
+            localStorage.setItem('omnicode-key', key);
+            localStorage.setItem('omnicode-model', model);
+            localStorage.setItem('omnicode-prompt', prompt);
             
             showNotification('Tetapan berjaya disimpan!');
         }
@@ -964,7 +976,13 @@ helloWorld();
             const sysPrompt = localStorage.getItem('omnicode-prompt') || '';
             const currentCode = monacoEditor ? monacoEditor.getValue() : '';
 
-            if (!key && url.includes('openai.com')) {
+            // Auto-fix URL if missing /chat/completions
+            let finalUrl = url;
+            if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
+                finalUrl = url + '/chat/completions';
+            }
+
+            if (!key) {
                 appendMessage('system', 'Ralat: Kunci API tidak ditemui. Sila masukkan di tab Tetapan.');
                 switchTab('settings');
                 return;
@@ -1006,7 +1024,7 @@ helloWorld();
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-                const response = await fetch(url, {
+                const response = await fetch(finalUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
