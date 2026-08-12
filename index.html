@@ -12,6 +12,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -86,12 +90,74 @@
         .sending {
             animation: pulse-send 1.5s ease-in-out infinite;
         }
+
+        /* Auth gate */
+        .auth-gate {
+            background: linear-gradient(135deg, #1e1e1e 0%, #252526 100%);
+        }
+
+        /* History panel */
+        .history-panel {
+            transform: translateX(100%);
+            transition: transform 0.3s ease-in-out;
+        }
+        .history-panel.open {
+            transform: translateX(0);
+        }
     </style>
 </head>
 <body class="bg-vsbg text-gray-300 font-sans antialiased overflow-hidden app-container flex flex-col md:flex-row select-none">
 
+    <!-- Auth Gate (shown when not authenticated) -->
+    <div id="auth-gate" class="fixed inset-0 z-[200] auth-gate flex items-center justify-center p-4 hidden">
+        <div class="bg-vsnav border border-vsborder rounded-lg p-8 max-w-md w-full text-center">
+            <div class="w-16 h-16 bg-vsblue rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-lock text-white text-2xl"></i>
+            </div>
+            <h1 class="text-xl font-bold text-white mb-2">OmniCode AI</h1>
+            <p class="text-sm text-gray-400 mb-6">IDE ini memerlukan pengesahan Google untuk akses.</p>
+            
+            <div id="auth-setup" class="hidden text-left space-y-3 mb-4">
+                <p class="text-xs text-yellow-400 mb-2"><i class="fas fa-exclamation-triangle mr-1"></i>Konfigurasi Firebase diperlukan:</p>
+                <input type="text" id="firebase-apiKey" placeholder="Firebase API Key" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                <input type="text" id="firebase-authDomain" placeholder="Firebase Auth Domain (cth: projek.firebaseapp.com)" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                <input type="text" id="firebase-projectId" placeholder="Firebase Project ID" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                <button onclick="saveFirebaseConfig()" class="w-full py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium transition-colors">
+                    Simpan Konfigurasi Firebase
+                </button>
+            </div>
+
+            <div id="auth-login" class="hidden">
+                <button onclick="signInWithGoogle()" class="w-full py-3 bg-white hover:bg-gray-100 text-gray-800 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 mb-3">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    Log Masuk dengan Google
+                </button>
+                <p class="text-xs text-gray-500">Hanya email yang dibenarkan boleh mengakses.</p>
+            </div>
+
+            <div id="auth-denied" class="hidden">
+                <div class="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <i class="fas fa-ban text-white text-xl"></i>
+                </div>
+                <p class="text-sm text-red-400 mb-2">Akses Ditolak</p>
+                <p class="text-xs text-gray-400 mb-4">Email anda tidak dibenarkan mengakses aplikasi ini.</p>
+                <button onclick="signOut()" class="text-xs text-vsblue hover:underline">Log keluar &amp; cuba email lain</button>
+            </div>
+
+            <div id="auth-loading" class="py-4">
+                <i class="fas fa-spinner fa-spin text-2xl text-vsblue"></i>
+                <p class="text-xs text-gray-400 mt-2">Menyemak pengesahan...</p>
+            </div>
+        </div>
+    </div>
+
     <!-- Navigation (Left on Desktop, Bottom on Mobile) -->
-    <nav class="md:w-16 w-full h-16 md:h-full bg-vsnav border-t md:border-t-0 md:border-r border-vsborder flex md:flex-col items-center justify-around md:justify-start md:pt-4 z-50 order-last md:order-first safe-area-bottom">
+    <nav id="main-nav" class="md:w-16 w-full h-16 md:h-full bg-vsnav border-t md:border-t-0 md:border-r border-vsborder flex md:flex-col items-center justify-around md:justify-start md:pt-4 z-50 order-last md:order-first safe-area-bottom">
         <button onclick="switchTab('editor')" id="nav-editor" class="text-gray-400 hover:text-white p-3 rounded-lg transition-colors active-tab text-white">
             <i class="fas fa-code text-xl"></i>
             <span class="text-[10px] block md:hidden mt-1">Penyunting</span>
@@ -100,10 +166,18 @@
             <i class="fas fa-sparkles text-xl"></i>
             <span class="text-[10px] block md:hidden mt-1">AI Chat</span>
         </button>
+        <button onclick="switchTab('history')" id="nav-history" class="text-gray-400 hover:text-white p-3 md:mt-4 rounded-lg transition-colors">
+            <i class="fas fa-history text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">Sejarah</span>
+        </button>
         <div class="hidden md:block flex-1"></div>
         <button onclick="switchTab('settings')" id="nav-settings" class="text-gray-400 hover:text-white p-3 md:mb-4 rounded-lg transition-colors">
             <i class="fas fa-cog text-xl"></i>
             <span class="text-[10px] block md:hidden mt-1">Tetapan</span>
+        </button>
+        <button onclick="signOut()" id="nav-logout" class="text-gray-400 hover:text-red-400 p-3 md:mb-4 rounded-lg transition-colors" title="Log Keluar">
+            <i class="fas fa-sign-out-alt text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">Keluar</span>
         </button>
     </nav>
 
@@ -133,6 +207,7 @@
                 <span id="status-line">Baris 1, Lajur 1</span>
                 <span id="status-lang">JavaScript</span>
                 <span id="status-size">0 aksara</span>
+                <span id="status-user" class="ml-auto text-vsblue"></span>
             </div>
         </section>
 
@@ -143,19 +218,45 @@
                     <i class="fas fa-robot text-blue-400 mr-2"></i>
                     <span class="text-sm font-medium">Pembantu AI</span>
                 </div>
-                <button onclick="clearChat()" class="text-xs bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Kosongkan chat">
-                    <i class="fas fa-trash"></i>
-                    <span class="hidden sm:inline">Kosongkan</span>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="toggleHistoryPanel()" class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Lihat sejarah prompt">
+                        <i class="fas fa-history"></i>
+                        <span class="hidden sm:inline">Sejarah</span>
+                    </button>
+                    <button onclick="clearChat()" class="text-xs bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Kosongkan chat">
+                        <i class="fas fa-trash"></i>
+                        <span class="hidden sm:inline">Kosongkan</span>
+                    </button>
+                </div>
             </div>
             
-            <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 select-text pb-20 md:pb-4">
-                <div class="flex items-start gap-3">
-                    <div class="w-8 h-8 rounded-full bg-vsblue flex items-center justify-center shrink-0">
-                        <i class="fas fa-robot text-white text-xs"></i>
+            <div class="flex-1 flex overflow-hidden">
+                <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 select-text pb-20 md:pb-4">
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-full bg-vsblue flex items-center justify-center shrink-0">
+                            <i class="fas fa-robot text-white text-xs"></i>
+                        </div>
+                        <div class="bg-vsnav border border-vsborder rounded-lg rounded-tl-none p-3 max-w-[85%]">
+                            <p class="text-sm">Helo! Saya sedia membantu anda mengekod. Pastikan anda telah mengkonfigurasi <b>Tetapan AI</b> terlebih dahulu.</p>
+                        </div>
                     </div>
-                    <div class="bg-vsnav border border-vsborder rounded-lg rounded-tl-none p-3 max-w-[85%]">
-                        <p class="text-sm">Helo! Saya sedia membantu anda mengekod. Pastikan anda telah mengkonfigurasi <b>Tetapan AI</b> terlebih dahulu.</p>
+                </div>
+
+                <!-- History Panel -->
+                <div id="history-panel" class="history-panel w-80 bg-vsnav border-l border-vsborder flex flex-col shrink-0 absolute right-0 top-0 bottom-0 md:relative">
+                    <div class="h-10 border-b border-vsborder flex items-center justify-between px-4 bg-[#1e1e1e]">
+                        <span class="text-sm font-medium">Sejarah Prompt</span>
+                        <button onclick="toggleHistoryPanel()" class="text-gray-400 hover:text-white md:hidden">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div id="history-list" class="flex-1 overflow-y-auto p-3 space-y-2">
+                        <p class="text-xs text-gray-500 text-center py-4">Tiada sejarah prompt.</p>
+                    </div>
+                    <div class="p-3 border-t border-vsborder">
+                        <button onclick="clearAllHistory()" class="w-full text-xs bg-red-700 hover:bg-red-600 text-white py-2 rounded transition-colors">
+                            Padam Semua Sejarah
+                        </button>
                     </div>
                 </div>
             </div>
@@ -168,6 +269,22 @@
                         <i class="fas fa-paper-plane text-xs"></i>
                     </button>
                 </div>
+            </div>
+        </section>
+
+        <!-- History View (Full page for mobile) -->
+        <section id="view-history" class="absolute inset-0 flex flex-col z-0 bg-vsbg opacity-0 pointer-events-none transition-opacity">
+            <div class="h-10 border-b border-vsborder flex items-center px-4 bg-[#1e1e1e]">
+                <i class="fas fa-history text-gray-400 mr-2"></i>
+                <span class="text-sm font-medium">Sejarah Prompt</span>
+            </div>
+            <div id="history-list-full" class="flex-1 overflow-y-auto p-4 space-y-3 select-text">
+                <p class="text-xs text-gray-500 text-center py-4">Tiada sejarah prompt.</p>
+            </div>
+            <div class="p-3 border-t border-vsborder">
+                <button onclick="clearAllHistory()" class="w-full text-xs bg-red-700 hover:bg-red-600 text-white py-2 rounded transition-colors">
+                    Padam Semua Sejarah
+                </button>
             </div>
         </section>
 
@@ -209,6 +326,28 @@
                         Simpan Tetapan
                     </button>
                 </div>
+
+                <div class="pt-4 border-t border-vsborder">
+                    <h3 class="text-lg font-semibold text-white mb-2">Konfigurasi Firebase</h3>
+                    <p class="text-xs text-gray-400 mb-4">Untuk mengaktifkan pengesahan Google. <a href="https://console.firebase.google.com/" target="_blank" class="text-vsblue hover:underline">Buka Firebase Console</a></p>
+                    
+                    <div class="space-y-3">
+                        <input type="text" id="setting-firebase-apiKey" placeholder="Firebase API Key" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <input type="text" id="setting-firebase-authDomain" placeholder="Auth Domain (cth: projek.firebaseapp.com)" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <input type="text" id="setting-firebase-projectId" placeholder="Project ID" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <button onclick="saveFirebaseConfigFromSettings()" class="w-full py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium transition-colors">
+                            Simpan Konfigurasi Firebase
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-vsborder">
+                    <h3 class="text-lg font-semibold text-white mb-2">Akaun</h3>
+                    <p class="text-xs text-gray-400 mb-3" id="current-user-email">Tiada pengguna log masuk</p>
+                    <button onclick="signOut()" class="w-full py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium transition-colors">
+                        Log Keluar
+                    </button>
+                </div>
             </div>
         </section>
 
@@ -229,12 +368,25 @@
     <!-- RequireJS for Monaco Editor -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
     <script>
+        // ============================================
+        // CONFIGURATION - ALLOWED EMAILS
+        // ============================================
+        const ALLOWED_EMAILS = [
+            'REDACTED_EMAIL_2',
+            'REDACTED_EMAIL_1',
+            'REDACTED_EMAIL_3'
+        ];
+
         // State variables
         let currentTab = 'editor';
         let chatHistory = [];
         let monacoEditor = null;
         let isSending = false;
         let currentLanguage = 'javascript';
+        let firebaseApp = null;
+        let firebaseAuth = null;
+        let currentUser = null;
+        let promptHistory = [];
 
         // Language mapping
         const langMap = {
@@ -260,7 +412,299 @@ function helloWorld() {
 helloWorld();
 `;
 
-        // Initialize Monaco Editor
+        // ============================================
+        // FIREBASE AUTHENTICATION
+        // ============================================
+        function initFirebase() {
+            const apiKey = localStorage.getItem('firebase-apiKey');
+            const authDomain = localStorage.getItem('firebase-authDomain');
+            const projectId = localStorage.getItem('firebase-projectId');
+
+            if (!apiKey || !authDomain || !projectId) {
+                showAuthSetup();
+                return false;
+            }
+
+            try {
+                if (!firebaseApp) {
+                    firebaseApp = firebase.initializeApp({
+                        apiKey: apiKey,
+                        authDomain: authDomain,
+                        projectId: projectId
+                    });
+                    firebaseAuth = firebase.auth();
+                    
+                    // Listen for auth state changes
+                    firebaseAuth.onAuthStateChanged(handleAuthStateChange);
+                }
+                return true;
+            } catch (error) {
+                console.error('Firebase init error:', error);
+                showAuthSetup();
+                return false;
+            }
+        }
+
+        function showAuthSetup() {
+            document.getElementById('auth-gate').classList.remove('hidden');
+            document.getElementById('auth-setup').classList.remove('hidden');
+            document.getElementById('auth-login').classList.add('hidden');
+            document.getElementById('auth-denied').classList.add('hidden');
+            document.getElementById('auth-loading').classList.add('hidden');
+        }
+
+        function showAuthLogin() {
+            document.getElementById('auth-gate').classList.remove('hidden');
+            document.getElementById('auth-setup').classList.add('hidden');
+            document.getElementById('auth-login').classList.remove('hidden');
+            document.getElementById('auth-denied').classList.add('hidden');
+            document.getElementById('auth-loading').classList.add('hidden');
+        }
+
+        function showAuthDenied() {
+            document.getElementById('auth-gate').classList.remove('hidden');
+            document.getElementById('auth-setup').classList.add('hidden');
+            document.getElementById('auth-login').classList.add('hidden');
+            document.getElementById('auth-denied').classList.remove('hidden');
+            document.getElementById('auth-loading').classList.add('hidden');
+        }
+
+        function hideAuthGate() {
+            document.getElementById('auth-gate').classList.add('hidden');
+        }
+
+        function saveFirebaseConfig() {
+            const apiKey = document.getElementById('firebase-apiKey').value.trim();
+            const authDomain = document.getElementById('firebase-authDomain').value.trim();
+            const projectId = document.getElementById('firebase-projectId').value.trim();
+
+            if (!apiKey || !authDomain || !projectId) {
+                showNotification('Sila isi semua medan konfigurasi Firebase.');
+                return;
+            }
+
+            localStorage.setItem('firebase-apiKey', apiKey);
+            localStorage.setItem('firebase-authDomain', authDomain);
+            localStorage.setItem('firebase-projectId', projectId);
+
+            // Reset Firebase and reinitialize
+            if (firebaseApp) {
+                firebaseApp.delete().then(() => {
+                    firebaseApp = null;
+                    firebaseAuth = null;
+                    initFirebase();
+                });
+            } else {
+                initFirebase();
+            }
+        }
+
+        function saveFirebaseConfigFromSettings() {
+            const apiKey = document.getElementById('setting-firebase-apiKey').value.trim();
+            const authDomain = document.getElementById('setting-firebase-authDomain').value.trim();
+            const projectId = document.getElementById('setting-firebase-projectId').value.trim();
+
+            if (!apiKey || !authDomain || !projectId) {
+                showNotification('Sila isi semua medan konfigurasi Firebase.');
+                return;
+            }
+
+            localStorage.setItem('firebase-apiKey', apiKey);
+            localStorage.setItem('firebase-authDomain', authDomain);
+            localStorage.setItem('firebase-projectId', projectId);
+
+            // Reset Firebase and reinitialize
+            if (firebaseApp) {
+                firebaseApp.delete().then(() => {
+                    firebaseApp = null;
+                    firebaseAuth = null;
+                    initFirebase();
+                    showNotification('Konfigurasi Firebase disimpan! Sila log masuk semula.');
+                });
+            } else {
+                initFirebase();
+                showNotification('Konfigurasi Firebase disimpan! Sila log masuk semula.');
+            }
+        }
+
+        async function signInWithGoogle() {
+            if (!firebaseAuth) {
+                showNotification('Firebase belum dikonfigurasi.');
+                return;
+            }
+
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try {
+                await firebaseAuth.signInWithPopup(provider);
+            } catch (error) {
+                console.error('Sign in error:', error);
+                if (error.code !== 'auth/popup-closed-by-user') {
+                    showNotification('Ralat log masuk: ' + error.message);
+                }
+            }
+        }
+
+        function signOut() {
+            if (firebaseAuth) {
+                firebaseAuth.signOut().catch((error) => {
+                    console.error('Sign out error:', error);
+                });
+            }
+            currentUser = null;
+            updateUserUI();
+            showAuthLogin();
+        }
+
+        function handleAuthStateChange(user) {
+            if (user) {
+                const email = user.email.toLowerCase();
+                if (ALLOWED_EMAILS.includes(email)) {
+                    currentUser = user;
+                    hideAuthGate();
+                    updateUserUI();
+                    loadPromptHistory();
+                } else {
+                    // Sign out unauthorized user immediately
+                    firebaseAuth.signOut().then(() => {
+                        currentUser = null;
+                        showAuthDenied();
+                    });
+                }
+            } else {
+                currentUser = null;
+                showAuthLogin();
+            }
+        }
+
+        function updateUserUI() {
+            const userEl = document.getElementById('status-user');
+            const emailEl = document.getElementById('current-user-email');
+            
+            if (currentUser) {
+                userEl.innerText = currentUser.email;
+                emailEl.innerText = 'Log masuk sebagai: ' + currentUser.email;
+            } else {
+                userEl.innerText = '';
+                emailEl.innerText = 'Tiada pengguna log masuk';
+            }
+        }
+
+        // ============================================
+        // PROMPT HISTORY
+        // ============================================
+        function loadPromptHistory() {
+            const saved = localStorage.getItem('omnicode-prompt-history');
+            if (saved) {
+                try {
+                    promptHistory = JSON.parse(saved);
+                } catch (e) {
+                    promptHistory = [];
+                }
+            } else {
+                promptHistory = [];
+            }
+            renderHistoryList();
+        }
+
+        function savePromptToHistory(prompt) {
+            if (!prompt.trim()) return;
+            
+            const entry = {
+                id: Date.now(),
+                prompt: prompt,
+                timestamp: new Date().toISOString(),
+                preview: prompt.length > 80 ? prompt.substring(0, 80) + '...' : prompt
+            };
+            
+            promptHistory.unshift(entry); // Add to beginning
+            if (promptHistory.length > 100) {
+                promptHistory = promptHistory.slice(0, 100); // Keep last 100
+            }
+            
+            localStorage.setItem('omnicode-prompt-history', JSON.stringify(promptHistory));
+            renderHistoryList();
+        }
+
+        function renderHistoryList() {
+            const listEl = document.getElementById('history-list');
+            const listFullEl = document.getElementById('history-list-full');
+            
+            if (promptHistory.length === 0) {
+                const emptyHtml = '<p class="text-xs text-gray-500 text-center py-4">Tiada sejarah prompt.</p>';
+                listEl.innerHTML = emptyHtml;
+                listFullEl.innerHTML = emptyHtml;
+                return;
+            }
+
+            const html = promptHistory.map(entry => `
+                <div class="bg-[#1e1e1e] border border-vsborder rounded-lg p-3 hover:border-vsblue transition-colors cursor-pointer group" onclick="useHistoryPrompt(${entry.id})">
+                    <p class="text-sm text-white mb-1 line-clamp-2">${escapeHTML(entry.preview)}</p>
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] text-gray-500">${formatDate(entry.timestamp)}</span>
+                        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="event.stopPropagation(); copyHistoryPrompt(${entry.id})" class="text-xs text-gray-400 hover:text-white p-1" title="Salin">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteHistoryPrompt(${entry.id})" class="text-xs text-gray-400 hover:text-red-400 p-1" title="Padam">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            listEl.innerHTML = html;
+            listFullEl.innerHTML = html;
+        }
+
+        function useHistoryPrompt(id) {
+            const entry = promptHistory.find(e => e.id === id);
+            if (entry) {
+                document.getElementById('chat-input').value = entry.prompt;
+                document.getElementById('chat-input').dispatchEvent(new Event('input'));
+                switchTab('chat');
+                showNotification('Prompt dimuatkan dari sejarah!');
+            }
+        }
+
+        function copyHistoryPrompt(id) {
+            const entry = promptHistory.find(e => e.id === id);
+            if (entry) {
+                navigator.clipboard.writeText(entry.prompt).then(() => {
+                    showNotification('Prompt disalin!');
+                });
+            }
+        }
+
+        function deleteHistoryPrompt(id) {
+            promptHistory = promptHistory.filter(e => e.id !== id);
+            localStorage.setItem('omnicode-prompt-history', JSON.stringify(promptHistory));
+            renderHistoryList();
+            showNotification('Prompt dipadam!');
+        }
+
+        function clearAllHistory() {
+            if (confirm('Adakah anda pasti mahu memadam semua sejarah prompt?')) {
+                promptHistory = [];
+                localStorage.removeItem('omnicode-prompt-history');
+                renderHistoryList();
+                showNotification('Semua sejarah dipadam!');
+            }
+        }
+
+        function toggleHistoryPanel() {
+            const panel = document.getElementById('history-panel');
+            panel.classList.toggle('open');
+        }
+
+        function formatDate(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleDateString('ms-MY') + ' ' + date.toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // ============================================
+        // MONACO EDITOR
+        // ============================================
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs' }});
         require(['vs/editor/editor.main'], function() {
             monacoEditor = monaco.editor.create(document.getElementById('monaco-container'), {
@@ -274,18 +718,15 @@ helloWorld();
                 padding: { top: 16 }
             });
 
-            // Auto save code to localstorage
             monacoEditor.onDidChangeModelContent(() => {
                 localStorage.setItem('omnicode-saved-code', monacoEditor.getValue());
                 updateStatusBar();
             });
 
-            // Update cursor position
             monacoEditor.onDidChangeCursorPosition((e) => {
                 document.getElementById('status-line').innerText = `Baris ${e.position.lineNumber}, Lajur ${e.position.column}`;
             });
 
-            // Keyboard shortcuts
             monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
                 runCode();
             });
@@ -297,43 +738,57 @@ helloWorld();
             updateStatusBar();
         });
 
-        // Tab Management
+        // ============================================
+        // TAB MANAGEMENT
+        // ============================================
         function switchTab(tabId) {
-            // Update Navigation UI
-            ['editor', 'chat', 'settings'].forEach(id => {
+            ['editor', 'chat', 'history', 'settings'].forEach(id => {
                 const btn = document.getElementById(`nav-${id}`);
-                btn.classList.remove('text-white', 'active-tab');
-                if (id === tabId) btn.classList.add('text-white', 'active-tab');
+                if (btn) {
+                    btn.classList.remove('text-white', 'active-tab');
+                    if (id === tabId) btn.classList.add('text-white', 'active-tab');
+                }
             });
 
-            // Update Views (Using z-index and opacity to avoid Monaco layout breaking)
-            ['editor', 'chat', 'settings'].forEach(id => {
+            ['editor', 'chat', 'history', 'settings'].forEach(id => {
                 const view = document.getElementById(`view-${id}`);
-                if (id === tabId) {
-                    view.classList.replace('z-0', 'z-10');
-                    view.classList.replace('opacity-0', 'opacity-100');
-                    view.classList.remove('pointer-events-none');
-                } else {
-                    view.classList.replace('z-10', 'z-0');
-                    view.classList.replace('opacity-100', 'opacity-0');
-                    view.classList.add('pointer-events-none');
+                if (view) {
+                    if (id === tabId) {
+                        view.classList.replace('z-0', 'z-10');
+                        view.classList.replace('opacity-0', 'opacity-100');
+                        view.classList.remove('pointer-events-none');
+                    } else {
+                        view.classList.replace('z-10', 'z-0');
+                        view.classList.replace('opacity-100', 'opacity-0');
+                        view.classList.add('pointer-events-none');
+                    }
                 }
             });
 
             currentTab = tabId;
             
-            // Fix Monaco layout on resize/show
             if (tabId === 'editor' && monacoEditor) {
                 setTimeout(() => monacoEditor.layout(), 100);
             }
+
+            if (tabId === 'history') {
+                renderHistoryList();
+            }
         }
 
-        // Settings Management
+        // ============================================
+        // SETTINGS
+        // ============================================
         function loadSettings() {
             document.getElementById('setting-url').value = localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions';
             document.getElementById('setting-key').value = localStorage.getItem('omnicode-key') || '';
             document.getElementById('setting-model').value = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
+            
+            // Firebase settings
+            document.getElementById('setting-firebase-apiKey').value = localStorage.getItem('firebase-apiKey') || '';
+            document.getElementById('setting-firebase-authDomain').value = localStorage.getItem('firebase-authDomain') || '';
+            document.getElementById('setting-firebase-projectId').value = localStorage.getItem('firebase-projectId') || '';
         }
 
         function saveSettings() {
@@ -358,13 +813,14 @@ helloWorld();
             }, 3000);
         }
 
-        // Status Bar
+        // ============================================
+        // STATUS BAR & LANGUAGE DETECTION
+        // ============================================
         function updateStatusBar() {
             if (!monacoEditor) return;
             const code = monacoEditor.getValue();
             document.getElementById('status-size').innerText = `${code.length} aksara`;
             
-            // Detect language from code
             const lang = detectLanguage(code);
             if (lang !== currentLanguage) {
                 currentLanguage = lang;
@@ -395,7 +851,9 @@ helloWorld();
             langEl.innerText = lang.charAt(0).toUpperCase() + lang.slice(1);
         }
 
-        // Editor Actions
+        // ============================================
+        // EDITOR ACTIONS
+        // ============================================
         function clearEditor() {
             if (confirm('Adakah anda pasti mahu mengosongkan editor? Tindakan ini tidak boleh diundur.')) {
                 monacoEditor.setValue('');
@@ -456,7 +914,9 @@ helloWorld();
             modal.classList.remove('flex');
         }
 
-        // Chat & AI Integration
+        // ============================================
+        // CHAT & AI INTEGRATION
+        // ============================================
         async function sendChatMessage() {
             if (isSending) return;
             
@@ -464,7 +924,6 @@ helloWorld();
             const prompt = inputEl.value.trim();
             if (!prompt) return;
 
-            // Check settings first
             const url = localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions';
             const key = localStorage.getItem('omnicode-key') || '';
             const model = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
@@ -477,25 +936,23 @@ helloWorld();
                 return;
             }
 
-            // Set sending state
             isSending = true;
             const sendBtn = document.getElementById('btn-send');
             sendBtn.disabled = true;
             sendBtn.classList.add('sending');
             sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>';
 
-            // Clear input and reset height
             inputEl.value = '';
             inputEl.style.height = 'auto';
 
-            // Add user message to UI
+            // Save to history
+            savePromptToHistory(prompt);
+
             appendMessage('user', prompt);
 
-            // Create placeholder for AI response
             const responseId = 'msg-' + Date.now();
             appendMessage('ai', 'Sedang memikirkan...', responseId, true);
 
-            // Construct payload (OpenAI Standard Format)
             const payload = {
                 model: model,
                 messages: [
@@ -503,7 +960,7 @@ helloWorld();
                         role: "system", 
                         content: sysPrompt + "\n\nKonteks kod fail semasa (main." + (langMap[currentLanguage]?.ext || 'js') + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
                     },
-                    ...chatHistory.slice(-5), // Keep last 5 messages for context
+                    ...chatHistory.slice(-5),
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.7
@@ -512,9 +969,8 @@ helloWorld();
             chatHistory.push({ role: "user", content: prompt });
 
             try {
-                // Add timeout to fetch
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
 
                 const response = await fetch(url, {
                     method: 'POST',
@@ -556,7 +1012,6 @@ helloWorld();
                 errorMsg += '\n\nSemak Tetapan AI anda.';
                 updateMessage(responseId, errorMsg);
             } finally {
-                // Reset sending state
                 isSending = false;
                 sendBtn.disabled = false;
                 sendBtn.classList.remove('sending');
@@ -601,7 +1056,7 @@ helloWorld();
             } else {
                 let parsedHTML = text;
                 if (!isPending) {
-                    parsedHTML = marked.parse(text); // parse markdown
+                    parsedHTML = marked.parse(text);
                 }
                 
                 msgDiv.innerHTML = `
@@ -617,7 +1072,6 @@ helloWorld();
             chatBox.appendChild(msgDiv);
             scrollToBottom();
             
-            // Add copy/insert buttons to code blocks
             if (!isPending && role === 'ai') addCodeBlockButtons(msgDiv);
         }
 
@@ -661,7 +1115,6 @@ helloWorld();
                 const btnContainer = document.createElement('div');
                 btnContainer.className = 'absolute top-2 right-2 flex gap-2';
 
-                // Copy Button
                 const copyBtn = document.createElement('button');
                 copyBtn.innerHTML = '<i class="fas fa-copy"></i>';
                 copyBtn.className = 'text-xs bg-gray-700 hover:bg-vsblue text-white w-7 h-7 rounded flex items-center justify-center transition-colors shadow';
@@ -671,7 +1124,6 @@ helloWorld();
                     navigator.clipboard.writeText(code).then(() => {
                         showNotification('Kod disalin!');
                     }).catch(() => {
-                        // Fallback
                         const textarea = document.createElement('textarea');
                         textarea.value = code;
                         document.body.appendChild(textarea);
@@ -682,7 +1134,6 @@ helloWorld();
                     });
                 };
 
-                // Append/Insert to Editor Button
                 const insertBtn = document.createElement('button');
                 insertBtn.innerHTML = '<i class="fas fa-file-import"></i>';
                 insertBtn.className = 'text-xs bg-gray-700 hover:bg-vsblue text-white w-7 h-7 rounded flex items-center justify-center transition-colors shadow';
@@ -697,7 +1148,7 @@ helloWorld();
                             forceMoveMarkers: true
                         }]);
                         showNotification('Kod berjaya dimasukkan!');
-                        switchTab('editor'); // Jump back to editor
+                        switchTab('editor');
                     }
                 };
 
@@ -707,11 +1158,15 @@ helloWorld();
             });
         }
 
-        // Initialize App
+        // ============================================
+        // INITIALIZATION
+        // ============================================
         window.onload = () => {
             loadSettings();
             
-            // Allow Enter to send chat
+            // Initialize Firebase Auth
+            initFirebase();
+
             document.getElementById('chat-input').addEventListener('keypress', function (e) {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -719,14 +1174,16 @@ helloWorld();
                 }
             });
 
-            // Handle escape key for preview modal
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') {
                     closePreview();
+                    // Close history panel on mobile
+                    if (window.innerWidth < 768) {
+                        document.getElementById('history-panel').classList.remove('open');
+                    }
                 }
             });
 
-            // Prevent zoom on double tap for iOS
             let lastTouchEnd = 0;
             document.addEventListener('touchend', function(e) {
                 const now = Date.now();
