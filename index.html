@@ -356,6 +356,16 @@
                         </button>
                         <div id="connection-result" class="mt-2 text-xs hidden"></div>
                     </div>
+
+                    <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="checkbox" id="setting-use-proxy" class="mr-2 rounded" checked>
+                            <div>
+                                <span class="text-sm font-medium text-yellow-300">Guna CORS Proxy</span>
+                                <p class="text-xs text-gray-400">Aktifkan jika mendapat ralat "Failed to fetch" atau CORS. Percuma dan selamat.</p>
+                            </div>
+                        </label>
+                    </div>
                     
                     <div>
                         <label class="block text-sm font-medium mb-1">API Key (Kunci API)</label>
@@ -1147,6 +1157,7 @@ helloWorld();
             document.getElementById('setting-key').value = localStorage.getItem('omnicode-key') || '';
             document.getElementById('setting-model').value = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
+            document.getElementById('setting-use-proxy').checked = localStorage.getItem('omnicode-use-proxy') !== 'false';
             
             // Firebase settings
             document.getElementById('setting-firebase-apiKey').value = localStorage.getItem('firebase-apiKey') || '';
@@ -1159,6 +1170,7 @@ helloWorld();
             const key = document.getElementById('setting-key').value.trim();
             const model = document.getElementById('setting-model').value.trim();
             const prompt = document.getElementById('setting-prompt').value.trim();
+            const useProxy = document.getElementById('setting-use-proxy').checked;
             
             // Auto-append /chat/completions if not present and URL ends with /v1
             if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
@@ -1169,8 +1181,17 @@ helloWorld();
             localStorage.setItem('omnicode-key', key);
             localStorage.setItem('omnicode-model', model);
             localStorage.setItem('omnicode-prompt', prompt);
+            localStorage.setItem('omnicode-use-proxy', useProxy);
             
             showNotification('Tetapan berjaya disimpan!');
+        }
+
+        function getProxiedUrl(url) {
+            const useProxy = localStorage.getItem('omnicode-use-proxy') !== 'false';
+            if (useProxy) {
+                return 'https://corsproxy.io/?' + encodeURIComponent(url);
+            }
+            return url;
         }
 
         async function testConnection() {
@@ -1200,7 +1221,11 @@ helloWorld();
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 15000);
                 
-                const response = await fetch(url, {
+                // Use proxy if enabled
+                const fetchUrl = getProxiedUrl(url);
+                console.log('Testing connection to:', fetchUrl);
+                
+                const response = await fetch(fetchUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1387,7 +1412,11 @@ helloWorld();
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-                const response = await fetch(finalUrl, {
+                // Use proxy if enabled
+                const fetchUrl = getProxiedUrl(finalUrl);
+                console.log('Sending AI request to:', fetchUrl);
+
+                const response = await fetch(fetchUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
