@@ -166,8 +166,12 @@
             <i class="fas fa-code text-xl"></i>
             <span class="text-[10px] block md:hidden mt-1">Penyunting</span>
         </button>
+        <button onclick="switchTab('files')" id="nav-files" class="text-gray-400 hover:text-white p-3 md:mt-4 rounded-lg transition-colors">
+            <i class="fas fa-folder-open text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">Fail</span>
+        </button>
         <button onclick="switchTab('chat')" id="nav-chat" class="text-gray-400 hover:text-white p-3 md:mt-4 rounded-lg transition-colors">
-            <i class="fas fa-sparkles text-xl"></i>
+            <i class="fas fa-comment-dots text-xl"></i>
             <span class="text-[10px] block md:hidden mt-1">AI Chat</span>
         </button>
         <button onclick="switchTab('history')" id="nav-history" class="text-gray-400 hover:text-white p-3 md:mt-4 rounded-lg transition-colors">
@@ -196,6 +200,10 @@
                     <span class="text-sm font-medium" id="file-name">main.js</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="downloadCurrentFile()" class="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Muat turun fail ke peranti">
+                        <i class="fas fa-download"></i>
+                        <span class="hidden sm:inline">Muat Turun</span>
+                    </button>
                     <button onclick="runCode()" id="btn-run" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Jalankan kod (Ctrl+Enter)">
                         <i class="fas fa-play"></i>
                         <span class="hidden sm:inline">Jalankan</span>
@@ -212,6 +220,39 @@
                 <span id="status-lang">JavaScript</span>
                 <span id="status-size">0 aksara</span>
                 <span id="status-user" class="ml-auto text-vsblue"></span>
+            </div>
+        </section>
+
+        <!-- Files View -->
+        <section id="view-files" class="absolute inset-0 flex flex-col z-0 bg-vsbg opacity-0 pointer-events-none transition-opacity">
+            <div class="h-10 border-b border-vsborder flex items-center px-4 bg-[#1e1e1e] justify-between">
+                <div class="flex items-center">
+                    <i class="fas fa-folder-open text-yellow-400 mr-2"></i>
+                    <span class="text-sm font-medium">Pengurus Fail</span>
+                </div>
+                <button onclick="createNewFile()" class="text-xs bg-vsblue hover:bg-blue-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1">
+                    <i class="fas fa-plus"></i>
+                    <span class="hidden sm:inline">Fail Baharu</span>
+                </button>
+            </div>
+
+            <!-- Upload Actions -->
+            <div class="p-3 border-b border-vsborder bg-vsnav grid grid-cols-2 gap-2">
+                <button onclick="document.getElementById('file-upload-input').click()" class="py-2.5 bg-[#3c3c3c] hover:bg-[#4a4a4a] border border-vsborder rounded text-sm text-white transition-colors flex items-center justify-center gap-2">
+                    <i class="fas fa-file-upload text-blue-400"></i>
+                    Muat Naik Fail
+                </button>
+                <button onclick="document.getElementById('folder-upload-input').click()" class="py-2.5 bg-[#3c3c3c] hover:bg-[#4a4a4a] border border-vsborder rounded text-sm text-white transition-colors flex items-center justify-center gap-2">
+                    <i class="fas fa-folder-plus text-yellow-400"></i>
+                    Muat Naik Folder
+                </button>
+                <input type="file" id="file-upload-input" multiple class="hidden" onchange="handleFileUpload(event)">
+                <input type="file" id="folder-upload-input" webkitdirectory directory multiple class="hidden" onchange="handleFolderUpload(event)">
+            </div>
+
+            <!-- File List -->
+            <div id="file-list" class="flex-1 overflow-y-auto p-3 space-y-1 select-text">
+                <p class="text-xs text-gray-500 text-center py-4">Tiada fail. Muat naik atau cipta fail baharu.</p>
             </div>
         </section>
 
@@ -405,11 +446,282 @@
             'markdown': { icon: 'fas fa-file-alt', color: 'text-gray-400', ext: 'md' }
         };
 
+        // Extension to language mapping
+        const extToLang = {
+            'js': 'javascript', 'mjs': 'javascript', 'jsx': 'javascript',
+            'ts': 'typescript', 'tsx': 'typescript',
+            'py': 'python',
+            'html': 'html', 'htm': 'html',
+            'css': 'css',
+            'json': 'json',
+            'md': 'markdown', 'markdown': 'markdown',
+            'txt': 'plaintext', 'xml': 'xml', 'svg': 'xml',
+            'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'c',
+            'cs': 'csharp', 'php': 'php', 'rb': 'ruby',
+            'go': 'go', 'rs': 'rust', 'swift': 'swift',
+            'kt': 'kotlin', 'sql': 'sql', 'sh': 'shell',
+            'yml': 'yaml', 'yaml': 'yaml'
+        };
+
+        // ============================================
+        // FILE MANAGER
+        // ============================================
+        let workspaceFiles = {};
+        let currentFileName = 'main.js';
+
+        function loadWorkspaceFiles() {
+            const saved = localStorage.getItem('droidlink-files');
+            if (saved) {
+                try {
+                    workspaceFiles = JSON.parse(saved);
+                } catch (e) {
+                    workspaceFiles = {};
+                }
+            }
+            // Migrate legacy saved code
+            const legacyCode = localStorage.getItem('omnicode-saved-code');
+            if (legacyCode && Object.keys(workspaceFiles).length === 0) {
+                workspaceFiles['main.js'] = legacyCode;
+                saveWorkspaceFiles();
+            }
+            // Ensure at least one file exists
+            if (Object.keys(workspaceFiles).length === 0) {
+                workspaceFiles['main.js'] = initialCode;
+                saveWorkspaceFiles();
+            }
+            // Restore last opened file
+            const lastFile = localStorage.getItem('droidlink-current-file');
+            if (lastFile && workspaceFiles.hasOwnProperty(lastFile)) {
+                currentFileName = lastFile;
+            } else {
+                currentFileName = Object.keys(workspaceFiles)[0];
+            }
+        }
+
+        function saveWorkspaceFiles() {
+            try {
+                localStorage.setItem('droidlink-files', JSON.stringify(workspaceFiles));
+            } catch (e) {
+                showNotification('Ralat: Storan penuh. Fail terlalu besar.');
+            }
+        }
+
+        function getLangFromFilename(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            return extToLang[ext] || 'plaintext';
+        }
+
+        function getFileIcon(filename) {
+            const lang = getLangFromFilename(filename);
+            const info = langMap[lang];
+            if (info) return { icon: info.icon, color: info.color };
+            return { icon: 'fas fa-file', color: 'text-gray-400' };
+        }
+
+        function renderFileList() {
+            const listEl = document.getElementById('file-list');
+            const names = Object.keys(workspaceFiles).sort();
+            
+            if (names.length === 0) {
+                listEl.innerHTML = '<p class="text-xs text-gray-500 text-center py-4">Tiada fail. Muat naik atau cipta fail baharu.</p>';
+                return;
+            }
+
+            listEl.innerHTML = names.map(name => {
+                const iconInfo = getFileIcon(name);
+                const isActive = name === currentFileName;
+                const size = workspaceFiles[name].length;
+                return `
+                    <div class="flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-colors ${isActive ? 'bg-vsblue/20 border border-vsblue' : 'bg-[#1e1e1e] border border-vsborder hover:border-gray-500'}" onclick="openFile('${escapeHTML(name)}')">
+                        <div class="flex items-center min-w-0 flex-1">
+                            <i class="${iconInfo.icon} ${iconInfo.color} mr-2.5 shrink-0"></i>
+                            <div class="min-w-0">
+                                <p class="text-sm text-white truncate">${escapeHTML(name)}</p>
+                                <p class="text-[10px] text-gray-500">${size} aksara</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0 ml-2">
+                            <button onclick="event.stopPropagation(); downloadFile('${escapeHTML(name)}')" class="text-gray-400 hover:text-blue-400 p-1.5" title="Muat turun">
+                                <i class="fas fa-download text-xs"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); renameFile('${escapeHTML(name)}')" class="text-gray-400 hover:text-yellow-400 p-1.5" title="Tukar nama">
+                                <i class="fas fa-edit text-xs"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteFile('${escapeHTML(name)}')" class="text-gray-400 hover:text-red-400 p-1.5" title="Padam">
+                                <i class="fas fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openFile(filename) {
+            // Save current file content first
+            if (monacoEditor && workspaceFiles.hasOwnProperty(currentFileName)) {
+                workspaceFiles[currentFileName] = monacoEditor.getValue();
+                saveWorkspaceFiles();
+            }
+
+            currentFileName = filename;
+            localStorage.setItem('droidlink-current-file', filename);
+
+            if (monacoEditor) {
+                monacoEditor.setValue(workspaceFiles[filename] || '');
+                const lang = getLangFromFilename(filename);
+                currentLanguage = lang;
+                monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
+                updateFileHeader(filename);
+            }
+
+            switchTab('editor');
+        }
+
+        function updateFileHeader(filename) {
+            const iconInfo = getFileIcon(filename);
+            document.getElementById('file-icon').className = `${iconInfo.icon} ${iconInfo.color} mr-2`;
+            document.getElementById('file-name').innerText = filename;
+            const lang = getLangFromFilename(filename);
+            document.getElementById('status-lang').innerText = lang.charAt(0).toUpperCase() + lang.slice(1);
+        }
+
+        function createNewFile() {
+            const name = prompt('Nama fail baharu (cth: script.js, page.html, style.css):');
+            if (!name || !name.trim()) return;
+            
+            const cleanName = name.trim();
+            if (workspaceFiles.hasOwnProperty(cleanName)) {
+                showNotification('Fail dengan nama ini sudah wujud!');
+                return;
+            }
+
+            workspaceFiles[cleanName] = '';
+            saveWorkspaceFiles();
+            renderFileList();
+            openFile(cleanName);
+            showNotification('Fail baharu dicipta!');
+        }
+
+        function renameFile(oldName) {
+            const newName = prompt('Nama baharu untuk "' + oldName + '":', oldName);
+            if (!newName || !newName.trim() || newName.trim() === oldName) return;
+            
+            const cleanName = newName.trim();
+            if (workspaceFiles.hasOwnProperty(cleanName)) {
+                showNotification('Fail dengan nama ini sudah wujud!');
+                return;
+            }
+
+            workspaceFiles[cleanName] = workspaceFiles[oldName];
+            delete workspaceFiles[oldName];
+            
+            if (currentFileName === oldName) {
+                currentFileName = cleanName;
+                localStorage.setItem('droidlink-current-file', cleanName);
+                updateFileHeader(cleanName);
+            }
+
+            saveWorkspaceFiles();
+            renderFileList();
+            showNotification('Nama fail ditukar!');
+        }
+
+        function deleteFile(filename) {
+            if (!confirm('Padam fail "' + filename + '"? Tindakan ini tidak boleh diundur.')) return;
+
+            delete workspaceFiles[filename];
+
+            // If deleted file was open, switch to another file
+            if (currentFileName === filename) {
+                const remaining = Object.keys(workspaceFiles);
+                if (remaining.length > 0) {
+                    openFile(remaining[0]);
+                } else {
+                    workspaceFiles['main.js'] = initialCode;
+                    openFile('main.js');
+                }
+            }
+
+            saveWorkspaceFiles();
+            renderFileList();
+            showNotification('Fail dipadam!');
+        }
+
+        function downloadFile(filename) {
+            const content = workspaceFiles[filename] || '';
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showNotification('Fail "' + filename + '" dimuat turun!');
+        }
+
+        function downloadCurrentFile() {
+            if (monacoEditor) {
+                workspaceFiles[currentFileName] = monacoEditor.getValue();
+                saveWorkspaceFiles();
+            }
+            downloadFile(currentFileName);
+        }
+
+        function handleFileUpload(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            let loaded = 0;
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    workspaceFiles[file.name] = e.target.result;
+                    loaded++;
+                    if (loaded === files.length) {
+                        saveWorkspaceFiles();
+                        renderFileList();
+                        showNotification(files.length + ' fail berjaya dimuat naik!');
+                        openFile(file.name);
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            event.target.value = ''; // Reset input
+        }
+
+        function handleFolderUpload(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            let loaded = 0;
+            Array.from(files).forEach(file => {
+                // Use relative path as filename (keeps folder structure)
+                const path = file.webkitRelativePath || file.name;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    workspaceFiles[path] = e.target.result;
+                    loaded++;
+                    if (loaded === files.length) {
+                        saveWorkspaceFiles();
+                        renderFileList();
+                        showNotification(files.length + ' fail dari folder berjaya dimuat naik!');
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            event.target.value = ''; // Reset input
+        }
+
         // Default Code
         const initialCode = `// Selamat datang ke DroidLink
-// 1. Pergi ke tab 'Tetapan' (Gear icon) untuk set API.
-// 2. Pergi ke tab 'AI Chat' (Sparkle icon) untuk mula.
-// 3. Tekan Ctrl+Enter untuk jalankan kod HTML/JS.
+// 1. Pergi ke tab 'Fail' untuk muat naik fail/folder dari peranti anda.
+// 2. Pergi ke tab 'Tetapan' untuk set API AI.
+// 3. Pergi ke tab 'AI Chat' untuk mula mengekod dengan AI.
+// 4. Tekan Ctrl+Enter untuk jalankan kod HTML/JS.
 
 function helloWorld() {
     console.log("Hello dari Malaysia!");
@@ -741,11 +1053,13 @@ helloWorld();
         // ============================================
         // MONACO EDITOR
         // ============================================
+        loadWorkspaceFiles();
+
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs' }});
         require(['vs/editor/editor.main'], function() {
             monacoEditor = monaco.editor.create(document.getElementById('monaco-container'), {
-                value: localStorage.getItem('omnicode-saved-code') || initialCode,
-                language: 'javascript',
+                value: workspaceFiles[currentFileName] || initialCode,
+                language: getLangFromFilename(currentFileName),
                 theme: 'vs-dark',
                 automaticLayout: true,
                 minimap: { enabled: false },
@@ -754,9 +1068,14 @@ helloWorld();
                 padding: { top: 16 }
             });
 
+            currentLanguage = getLangFromFilename(currentFileName);
+            updateFileHeader(currentFileName);
+
             monacoEditor.onDidChangeModelContent(() => {
-                localStorage.setItem('omnicode-saved-code', monacoEditor.getValue());
-                updateStatusBar();
+                // Auto-save current file to workspace
+                workspaceFiles[currentFileName] = monacoEditor.getValue();
+                saveWorkspaceFiles();
+                document.getElementById('status-size').innerText = `${monacoEditor.getValue().length} aksara`;
             });
 
             monacoEditor.onDidChangeCursorPosition((e) => {
@@ -768,7 +1087,7 @@ helloWorld();
             });
 
             monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                showNotification('Kod disimpan secara automatik!');
+                showNotification('Fail "' + currentFileName + '" disimpan!');
             });
 
             updateStatusBar();
@@ -778,7 +1097,7 @@ helloWorld();
         // TAB MANAGEMENT
         // ============================================
         function switchTab(tabId) {
-            ['editor', 'chat', 'history', 'settings'].forEach(id => {
+            ['editor', 'files', 'chat', 'history', 'settings'].forEach(id => {
                 const btn = document.getElementById(`nav-${id}`);
                 if (btn) {
                     btn.classList.remove('text-white', 'active-tab');
@@ -786,7 +1105,7 @@ helloWorld();
                 }
             });
 
-            ['editor', 'chat', 'history', 'settings'].forEach(id => {
+            ['editor', 'files', 'chat', 'history', 'settings'].forEach(id => {
                 const view = document.getElementById(`view-${id}`);
                 if (view) {
                     if (id === tabId) {
@@ -809,6 +1128,10 @@ helloWorld();
 
             if (tabId === 'history') {
                 renderHistoryList();
+            }
+
+            if (tabId === 'files') {
+                renderFileList();
             }
         }
 
@@ -860,48 +1183,19 @@ helloWorld();
         }
 
         // ============================================
-        // STATUS BAR & LANGUAGE DETECTION
+        // STATUS BAR
         // ============================================
         function updateStatusBar() {
             if (!monacoEditor) return;
             const code = monacoEditor.getValue();
             document.getElementById('status-size').innerText = `${code.length} aksara`;
-            
-            const lang = detectLanguage(code);
-            if (lang !== currentLanguage) {
-                currentLanguage = lang;
-                monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
-                updateFileIcon(lang);
-            }
-        }
-
-        function detectLanguage(code) {
-            if (code.trim().startsWith('<!DOCTYPE') || code.trim().startsWith('<html')) return 'html';
-            if (code.includes('def ') && code.includes(':')) return 'python';
-            if (code.includes('function') || code.includes('=>') || code.includes('console.log')) return 'javascript';
-            if (code.includes('interface ') || code.includes(': string') || code.includes(': number')) return 'typescript';
-            if (code.trim().startsWith('{') && code.includes('":')) return 'json';
-            if (code.includes('# ') && code.includes('\n')) return 'markdown';
-            if (code.includes('{') && code.includes('}') && code.includes(':') && !code.includes('function')) return 'css';
-            return 'javascript';
-        }
-
-        function updateFileIcon(lang) {
-            const info = langMap[lang] || langMap['javascript'];
-            const iconEl = document.getElementById('file-icon');
-            const nameEl = document.getElementById('file-name');
-            const langEl = document.getElementById('status-lang');
-            
-            iconEl.className = `${info.icon} ${info.color} mr-2`;
-            nameEl.innerText = `main.${info.ext}`;
-            langEl.innerText = lang.charAt(0).toUpperCase() + lang.slice(1);
         }
 
         // ============================================
         // EDITOR ACTIONS
         // ============================================
         function clearEditor() {
-            if (confirm('Adakah anda pasti mahu mengosongkan editor? Tindakan ini tidak boleh diundur.')) {
+            if (confirm('Adakah anda pasti mahu mengosongkan fail "' + currentFileName + '"? Tindakan ini tidak boleh diundur.')) {
                 monacoEditor.setValue('');
                 showNotification('Editor dikosongkan!');
             }
@@ -1010,7 +1304,7 @@ helloWorld();
                 messages: [
                     { 
                         role: "system", 
-                        content: sysPrompt + "\n\nKonteks kod fail semasa (main." + (langMap[currentLanguage]?.ext || 'js') + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
+                        content: sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
                     },
                     ...chatHistory.slice(-5),
                     { role: "user", content: prompt }
