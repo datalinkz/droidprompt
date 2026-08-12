@@ -96,6 +96,22 @@
             animation: pulse-send 1.5s ease-in-out infinite;
         }
 
+        /* Chat mode buttons */
+        .chat-mode-btn {
+            background: #3c3c3c;
+            color: #9ca3af;
+            border: 1px solid #3c3c3c;
+        }
+        .chat-mode-btn:hover {
+            background: #4a4a4a;
+            color: #d1d5db;
+        }
+        .chat-mode-btn.active {
+            background: #0e639c;
+            color: #ffffff;
+            border-color: #0e639c;
+        }
+
         /* Auth gate */
         .auth-gate {
             background: linear-gradient(135deg, #1e1e1e 0%, #252526 100%);
@@ -283,6 +299,29 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Mode Selector -->
+            <div class="px-4 py-2 bg-vsnav border-b border-vsborder">
+                <div class="flex items-center gap-1 overflow-x-auto">
+                    <span class="text-[10px] text-gray-500 mr-1 shrink-0">Mod:</span>
+                    <button onclick="setChatMode('code')" id="mode-code" class="chat-mode-btn active text-xs px-3 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1">
+                        <i class="fas fa-code text-[10px]"></i>
+                        <span>Kod</span>
+                    </button>
+                    <button onclick="setChatMode('ask')" id="mode-ask" class="chat-mode-btn text-xs px-3 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1">
+                        <i class="fas fa-question-circle text-[10px]"></i>
+                        <span>Tanya</span>
+                    </button>
+                    <button onclick="setChatMode('plan')" id="mode-plan" class="chat-mode-btn text-xs px-3 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1">
+                        <i class="fas fa-project-diagram text-[10px]"></i>
+                        <span>Rancang</span>
+                    </button>
+                    <button onclick="setChatMode('debug')" id="mode-debug" class="chat-mode-btn text-xs px-3 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1">
+                        <i class="fas fa-bug text-[10px]"></i>
+                        <span>Nyahpepijat</span>
+                    </button>
+                </div>
+            </div>
             
             <div class="flex-1 flex overflow-hidden">
                 <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 select-text pb-20 md:pb-4">
@@ -457,6 +496,27 @@
         let firebaseAuth = null;
         let currentUser = null;
         let promptHistory = [];
+        let chatMode = 'code';
+
+        // Chat mode system prompts
+        const chatModes = {
+            code: {
+                name: 'Kod',
+                prompt: 'Anda adalah pembantu pengaturcaraan pakar (expert coding assistant). Fokus pada menulis kod yang lengkap, bersih, dan mengikut best practices. Jawab dengan kod yang boleh terus digunakan. Sertakan penjelasan ringkas jika perlu, tetapi utamakan kod.'
+            },
+            ask: {
+                name: 'Tanya',
+                prompt: 'Anda adalah pembantu yang berpengetahuan luas. Jawab soalan dengan jelas, tepat, dan mudah difahami. Jangan tulis kod melainkan diminta secara eksplisit. Fokus pada penjelasan konsep, definisi, dan jawapan yang informatif.'
+            },
+            plan: {
+                name: 'Rancang',
+                prompt: 'Anda adalah perancang projek perisian (software project planner). Bantu pengguna merancang struktur projek, memilih teknologi yang sesuai, membahagikan tugas, dan membuat roadmap. Fokus pada perancangan, bukan kod. Sertakan langkah-langkah yang jelas dan boleh diambil.'
+            },
+            debug: {
+                name: 'Nyahpepijat',
+                prompt: 'Anda adalah pakar nyahpepijat (debugging expert). Analisis kod yang diberikan dengan teliti. Kenal pasti pepijat (bugs), isu logik, dan masalah prestasi. Cadangkan penyelesaian yang spesifik dan jelas. Jika tiada pepijat, beritahu pengguna dan cadangkan penambahbaikan.'
+            }
+        };
 
         // Language mapping
         const langMap = {
@@ -939,6 +999,7 @@ helloWorld();
                     updateUserUI();
                     loadPromptHistory();
                     loadChatConversation();
+                    loadChatMode();
                 } else {
                     // Sign out unauthorized user immediately
                     firebaseAuth.signOut().then(() => {
@@ -973,6 +1034,67 @@ helloWorld();
                 return baseKey + '-' + currentUser.email.toLowerCase().replace(/[^a-z0-9]/g, '-');
             }
             return baseKey;
+        }
+
+        // ============================================
+        // CHAT MODE
+        // ============================================
+        function setChatMode(mode) {
+            chatMode = mode;
+            
+            // Update UI
+            Object.keys(chatModes).forEach(m => {
+                const btn = document.getElementById('mode-' + m);
+                if (btn) {
+                    btn.classList.remove('active');
+                    if (m === mode) btn.classList.add('active');
+                }
+            });
+            
+            // Save per user
+            localStorage.setItem(getUserKey('droidlink-chat-mode'), mode);
+            
+            // Update placeholder
+            const inputEl = document.getElementById('chat-input');
+            const placeholders = {
+                code: 'Arahkan jana kod... (cth: "buatkan fungsi login")',
+                ask: 'Tanya soalan... (cth: "apa itu recursion?")',
+                plan: 'Rancang projek... (cth: "rancang app to-do list")',
+                debug: 'Hantar kod untuk nyahpepijat... (cth: "kenapa kod ini error?")'
+            };
+            inputEl.placeholder = placeholders[mode] || 'Tanya AI atau arahkan jana kod...';
+            
+            showNotification('Mod ' + chatModes[mode].name + ' diaktifkan!');
+        }
+
+        function loadChatMode() {
+            const saved = localStorage.getItem(getUserKey('droidlink-chat-mode'));
+            if (saved && chatModes[saved]) {
+                chatMode = saved;
+            }
+            
+            // Update UI
+            Object.keys(chatModes).forEach(m => {
+                const btn = document.getElementById('mode-' + m);
+                if (btn) {
+                    btn.classList.remove('active');
+                    if (m === chatMode) btn.classList.add('active');
+                }
+            });
+            
+            // Update placeholder
+            const inputEl = document.getElementById('chat-input');
+            const placeholders = {
+                code: 'Arahkan jana kod... (cth: "buatkan fungsi login")',
+                ask: 'Tanya soalan... (cth: "apa itu recursion?")',
+                plan: 'Rancang projek... (cth: "rancang app to-do list")',
+                debug: 'Hantar kod untuk nyahpepijat... (cth: "kenapa kod ini error?")'
+            };
+            inputEl.placeholder = placeholders[chatMode] || 'Tanya AI atau arahkan jana kod...';
+        }
+
+        function getChatModePrompt() {
+            return chatModes[chatMode].prompt;
         }
 
         // ============================================
@@ -1422,7 +1544,7 @@ helloWorld();
                 messages: [
                     { 
                         role: "system", 
-                        content: sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
+                        content: getChatModePrompt() + "\n\n" + sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
                     },
                     ...chatHistory.slice(-5),
                     { role: "user", content: prompt }
