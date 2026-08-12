@@ -7,11 +7,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1e1e1e">
     <title>DroidLink - Mobile IDE</title>
-    
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-title" content="DroidLink">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    
+
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -179,6 +184,10 @@
             <span class="text-[10px] block md:hidden mt-1">Sejarah</span>
         </button>
         <div class="hidden md:block flex-1"></div>
+        <button onclick="installApp()" id="nav-install" class="hidden text-gray-400 hover:text-green-400 p-3 md:mb-4 rounded-lg transition-colors" title="Pasang Aplikasi">
+            <i class="fas fa-download text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">Pasang</span>
+        </button>
         <button onclick="switchTab('settings')" id="nav-settings" class="text-gray-400 hover:text-white p-3 md:mb-4 rounded-lg transition-colors">
             <i class="fas fa-cog text-xl"></i>
             <span class="text-[10px] block md:hidden mt-1">Tetapan</span>
@@ -1610,6 +1619,97 @@ helloWorld();
         }
 
         // ============================================
+        // PWA INSTALL
+        // ============================================
+        let deferredPrompt = null;
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch((err) => {
+                console.log('SW registration failed:', err);
+            });
+        }
+
+        // Listen for install prompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            // Show install button
+            const installBtn = document.getElementById('nav-install');
+            if (installBtn) installBtn.classList.remove('hidden');
+        });
+
+        // Detect if already installed
+        window.addEventListener('appinstalled', () => {
+            deferredPrompt = null;
+            const installBtn = document.getElementById('nav-install');
+            if (installBtn) installBtn.classList.add('hidden');
+            showNotification('DroidLink berjaya dipasang!');
+        });
+
+        // Detect iOS (no beforeinstallprompt on iOS)
+        function isIOS() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        }
+
+        function isInStandaloneMode() {
+            return window.matchMedia('(display-mode: standalone)').matches ||
+                   window.navigator.standalone === true;
+        }
+
+        async function installApp() {
+            if (deferredPrompt) {
+                // Android/Chrome: use native prompt
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    showNotification('Memasang DroidLink...');
+                }
+                deferredPrompt = null;
+                document.getElementById('nav-install').classList.add('hidden');
+            } else if (isIOS()) {
+                // iOS: show instructions
+                showIOSInstallGuide();
+            } else {
+                showNotification('Aplikasi sudah dipasang atau browser tidak menyokong pemasangan.');
+            }
+        }
+
+        function showIOSInstallGuide() {
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-80 z-[300] flex items-center justify-center p-4';
+            modal.id = 'ios-install-modal';
+            modal.innerHTML = `
+                <div class="bg-vsnav border border-vsborder rounded-lg p-6 max-w-sm w-full">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-white">Pasang DroidLink</h3>
+                        <button onclick="document.getElementById('ios-install-modal').remove()" class="text-gray-400 hover:text-white">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="space-y-4 text-sm text-gray-300">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-vsblue rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm">1</div>
+                            <p>Tekan butang <b>Kongsi</b> <i class="fas fa-share-from-square text-blue-400"></i> di bawah skrin Safari</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-vsblue rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm">2</div>
+                            <p>Scroll ke bawah dan pilih <b>"Add to Home Screen"</b> <i class="fas fa-plus-square text-blue-400"></i></p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-vsblue rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm">3</div>
+                            <p>Tekan <b>"Add"</b> di penjuru kanan atas</p>
+                        </div>
+                    </div>
+                    <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded text-center">
+                        <p class="text-xs text-green-300">Ikon DroidLink akan muncul di Home Screen anda!</p>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // ============================================
         // INITIALIZATION
         // ============================================
         window.onload = () => {
@@ -1617,6 +1717,12 @@ helloWorld();
             
             // Initialize Firebase Auth
             initFirebase();
+
+            // Show iOS install button if on iOS and not installed
+            if (isIOS() && !isInStandaloneMode()) {
+                const installBtn = document.getElementById('nav-install');
+                if (installBtn) installBtn.classList.remove('hidden');
+            }
 
             document.getElementById('chat-input').addEventListener('keypress', function (e) {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -1628,10 +1734,11 @@ helloWorld();
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') {
                     closePreview();
-                    // Close history panel on mobile
                     if (window.innerWidth < 768) {
                         document.getElementById('history-panel').classList.remove('open');
                     }
+                    const iosModal = document.getElementById('ios-install-modal');
+                    if (iosModal) iosModal.remove();
                 }
             });
 
