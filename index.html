@@ -138,6 +138,10 @@
                     Log Masuk dengan Google
                 </button>
                 <p class="text-xs text-gray-500">Hanya email yang dibenarkan boleh mengakses.</p>
+                <div class="mt-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded text-left">
+                    <p class="text-xs text-yellow-400 font-medium mb-1"><i class="fas fa-info-circle mr-1"></i>Nota Penting:</p>
+                    <p class="text-[10px] text-yellow-300/80">Pastikan domain <code class="bg-yellow-900/50 px-1 rounded">datalinkz.github.io</code> telah ditambah dalam <b>Firebase Console > Authentication > Settings > Authorized domains</b>.</p>
+                </div>
             </div>
 
             <div id="auth-denied" class="hidden">
@@ -415,6 +419,22 @@ helloWorld();
         // ============================================
         // FIREBASE AUTHENTICATION
         // ============================================
+        // ============================================
+        // FIREBASE CONFIGURATION - PRE-FILLED
+        // ============================================
+        const DEFAULT_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyBDTGnU9eVNLOuYRUbHGxkNLjzjiojwTxo",
+            authDomain: "droidlink-eb984.firebaseapp.com",
+            projectId: "droidlink-eb984"
+        };
+
+        // Set default Firebase config if not exists
+        if (!localStorage.getItem('firebase-apiKey')) {
+            localStorage.setItem('firebase-apiKey', DEFAULT_FIREBASE_CONFIG.apiKey);
+            localStorage.setItem('firebase-authDomain', DEFAULT_FIREBASE_CONFIG.authDomain);
+            localStorage.setItem('firebase-projectId', DEFAULT_FIREBASE_CONFIG.projectId);
+        }
+
         function initFirebase() {
             const apiKey = localStorage.getItem('firebase-apiKey');
             const authDomain = localStorage.getItem('firebase-authDomain');
@@ -534,11 +554,25 @@ helloWorld();
             }
 
             const provider = new firebase.auth.GoogleAuthProvider();
+            provider.addScope('email');
+            provider.addScope('profile');
+            
             try {
+                // Try popup first
                 await firebaseAuth.signInWithPopup(provider);
             } catch (error) {
                 console.error('Sign in error:', error);
-                if (error.code !== 'auth/popup-closed-by-user') {
+                
+                // Handle specific errors
+                if (error.code === 'auth/unauthorized-domain') {
+                    showNotification('Ralat: Domain tidak dibenarkan. Sila tambah domain di Firebase Console > Authentication > Settings > Authorized domains.');
+                } else if (error.code === 'auth/popup-blocked') {
+                    showNotification('Popup disekat. Sila benarkan popup untuk laman ini.');
+                } else if (error.code === 'auth/popup-closed-by-user') {
+                    // User closed popup, do nothing
+                } else if (error.code === 'auth/operation-not-allowed') {
+                    showNotification('Google Sign-In tidak diaktifkan. Sila aktifkan di Firebase Console.');
+                } else {
                     showNotification('Ralat log masuk: ' + error.message);
                 }
             }
