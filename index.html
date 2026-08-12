@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1e1e1e">
+    <title>OmniCode AI - Mobile IDE</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        vsbg: '#1e1e1e',
+                        vsnav: '#252526',
+                        vsborder: '#3c3c3c',
+                        vsblue: '#0e639c'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar to match dark IDE theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4f4f4f;
+        }
+        
+        /* Mobile height fix */
+        .app-container {
+            height: 100dvh;
+        }
+
+        /* Markdown styling for AI chat */
+        .prose pre {
+            background-color: #0d0d0d;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            position: relative;
+        }
+        .prose code {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.875em;
+            color: #d4d4d4;
+        }
+        .prose p { margin-bottom: 0.75rem; }
+
+        /* Safe area for mobile notches */
+        .safe-area-bottom {
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        .safe-area-top {
+            padding-top: env(safe-area-inset-top, 0px);
+        }
+
+        /* Status bar */
+        .status-bar {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+        }
+
+        /* Animation for sending */
+        @keyframes pulse-send {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .sending {
+            animation: pulse-send 1.5s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-vsbg text-gray-300 font-sans antialiased overflow-hidden app-container flex flex-col md:flex-row select-none">
+
+    <!-- Navigation (Left on Desktop, Bottom on Mobile) -->
+    <nav class="md:w-16 w-full h-16 md:h-full bg-vsnav border-t md:border-t-0 md:border-r border-vsborder flex md:flex-col items-center justify-around md:justify-start md:pt-4 z-50 order-last md:order-first safe-area-bottom">
+        <button onclick="switchTab('editor')" id="nav-editor" class="text-gray-400 hover:text-white p-3 rounded-lg transition-colors active-tab text-white">
+            <i class="fas fa-code text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">Penyunting</span>
+        </button>
+        <button onclick="switchTab('chat')" id="nav-chat" class="text-gray-400 hover:text-white p-3 md:mt-4 rounded-lg transition-colors">
+            <i class="fas fa-sparkles text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">AI Chat</span>
+        </button>
+        <div class="hidden md:block flex-1"></div>
+        <button onclick="switchTab('settings')" id="nav-settings" class="text-gray-400 hover:text-white p-3 md:mb-4 rounded-lg transition-colors">
+            <i class="fas fa-cog text-xl"></i>
+            <span class="text-[10px] block md:hidden mt-1">Tetapan</span>
+        </button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 relative overflow-hidden flex flex-col order-first md:order-last">
+        
+        <!-- Editor View -->
+        <section id="view-editor" class="absolute inset-0 flex flex-col z-10 bg-vsbg opacity-100 transition-opacity">
+            <div class="h-10 border-b border-vsborder flex items-center px-4 bg-[#1e1e1e] justify-between">
+                <div class="flex items-center">
+                    <i class="fab fa-js text-yellow-400 mr-2" id="file-icon"></i>
+                    <span class="text-sm font-medium" id="file-name">main.js</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="runCode()" id="btn-run" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Jalankan kod (Ctrl+Enter)">
+                        <i class="fas fa-play"></i>
+                        <span class="hidden sm:inline">Jalankan</span>
+                    </button>
+                    <button onclick="clearEditor()" class="text-xs bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Kosongkan editor">
+                        <i class="fas fa-trash"></i>
+                        <span class="hidden sm:inline">Kosongkan</span>
+                    </button>
+                </div>
+            </div>
+            <div id="monaco-container" class="flex-1 w-full text-left cursor-text select-text"></div>
+            <div id="status-bar" class="h-6 bg-vsnav border-t border-vsborder flex items-center px-4 text-gray-400 status-bar gap-4 select-text">
+                <span id="status-line">Baris 1, Lajur 1</span>
+                <span id="status-lang">JavaScript</span>
+                <span id="status-size">0 aksara</span>
+            </div>
+        </section>
+
+        <!-- Chat View -->
+        <section id="view-chat" class="absolute inset-0 flex flex-col z-0 bg-vsbg opacity-0 pointer-events-none transition-opacity">
+            <div class="h-10 border-b border-vsborder flex items-center px-4 bg-[#1e1e1e] justify-between">
+                <div class="flex items-center">
+                    <i class="fas fa-robot text-blue-400 mr-2"></i>
+                    <span class="text-sm font-medium">Pembantu AI</span>
+                </div>
+                <button onclick="clearChat()" class="text-xs bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Kosongkan chat">
+                    <i class="fas fa-trash"></i>
+                    <span class="hidden sm:inline">Kosongkan</span>
+                </button>
+            </div>
+            
+            <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 select-text pb-20 md:pb-4">
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-full bg-vsblue flex items-center justify-center shrink-0">
+                        <i class="fas fa-robot text-white text-xs"></i>
+                    </div>
+                    <div class="bg-vsnav border border-vsborder rounded-lg rounded-tl-none p-3 max-w-[85%]">
+                        <p class="text-sm">Helo! Saya sedia membantu anda mengekod. Pastikan anda telah mengkonfigurasi <b>Tetapan AI</b> terlebih dahulu.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Input -->
+            <div class="p-3 border-t border-vsborder bg-vsnav safe-area-bottom">
+                <div class="relative flex items-center">
+                    <textarea id="chat-input" rows="1" placeholder="Tanya AI atau arahkan jana kod..." class="w-full bg-[#1e1e1e] border border-vsborder text-white text-sm rounded-lg pl-3 pr-12 py-3 focus:outline-none focus:border-vsblue resize-none overflow-hidden" oninput="this.style.height = '';this.style.height = Math.min(this.scrollHeight, 120) + 'px'"></textarea>
+                    <button onclick="sendChatMessage()" id="btn-send" class="absolute right-2 bottom-2 w-8 h-8 rounded bg-vsblue text-white flex items-center justify-center hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fas fa-paper-plane text-xs"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Settings View -->
+        <section id="view-settings" class="absolute inset-0 flex flex-col z-0 bg-vsbg opacity-0 pointer-events-none transition-opacity overflow-y-auto select-text">
+            <div class="h-10 border-b border-vsborder flex items-center px-4 bg-[#1e1e1e]">
+                <i class="fas fa-sliders-h text-gray-400 mr-2"></i>
+                <span class="text-sm font-medium">Tetapan Ejen (Agent Settings)</span>
+            </div>
+            
+            <div class="p-6 max-w-2xl mx-auto w-full space-y-6">
+                <div>
+                    <h2 class="text-xl font-semibold text-white mb-2">Konfigurasi Pembekal AI</h2>
+                    <p class="text-xs text-gray-400 mb-4">Aplikasi ini mematuhi standard API OpenAI. Anda boleh menyambungkannya ke OpenAI, Groq, LM Studio, Ollama, dll.</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">API Endpoint URL</label>
+                        <input type="text" id="setting-url" placeholder="cth: https://api.openai.com/v1/chat/completions" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-1">API Key (Kunci API)</label>
+                        <input type="password" id="setting-key" placeholder="sk-..." class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Nama Model</label>
+                        <input type="text" id="setting-model" placeholder="cth: gpt-3.5-turbo atau llama3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-1">System Prompt</label>
+                        <textarea id="setting-prompt" rows="3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">Anda adalah pembantu pengaturcaraan pakar (expert coding assistant). Jawab dengan padat dan berikan kod yang lengkap.</textarea>
+                    </div>
+
+                    <button onclick="saveSettings()" class="w-full py-2 bg-vsblue hover:bg-blue-600 text-white rounded font-medium transition-colors">
+                        Simpan Tetapan
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Preview Modal for Run -->
+    <div id="preview-modal" class="fixed inset-0 bg-black bg-opacity-80 z-[100] hidden flex-col">
+        <div class="h-10 bg-vsnav border-b border-vsborder flex items-center justify-between px-4">
+            <span class="text-sm font-medium text-white">Pratonton Hasil</span>
+            <button onclick="closePreview()" class="text-gray-400 hover:text-white p-2">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <iframe id="preview-frame" class="flex-1 w-full bg-white"></iframe>
+    </div>
+
+    <!-- Scripts -->
+    <!-- RequireJS for Monaco Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+    <script>
+        // State variables
+        let currentTab = 'editor';
+        let chatHistory = [];
+        let monacoEditor = null;
+        let isSending = false;
+        let currentLanguage = 'javascript';
+
+        // Language mapping
+        const langMap = {
+            'javascript': { icon: 'fab fa-js', color: 'text-yellow-400', ext: 'js' },
+            'typescript': { icon: 'fab fa-js', color: 'text-blue-400', ext: 'ts' },
+            'python': { icon: 'fab fa-python', color: 'text-blue-300', ext: 'py' },
+            'html': { icon: 'fab fa-html5', color: 'text-orange-400', ext: 'html' },
+            'css': { icon: 'fab fa-css3-alt', color: 'text-blue-400', ext: 'css' },
+            'json': { icon: 'fas fa-file-code', color: 'text-gray-400', ext: 'json' },
+            'markdown': { icon: 'fas fa-file-alt', color: 'text-gray-400', ext: 'md' }
+        };
+
+        // Default Code
+        const initialCode = `// Selamat datang ke OmniCode AI
+// 1. Pergi ke tab 'Tetapan' (Gear icon) untuk set API.
+// 2. Pergi ke tab 'AI Chat' (Sparkle icon) untuk mula.
+// 3. Tekan Ctrl+Enter untuk jalankan kod HTML/JS.
+
+function helloWorld() {
+    console.log("Hello dari Malaysia!");
+}
+
+helloWorld();
+`;
+
+        // Initialize Monaco Editor
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            monacoEditor = monaco.editor.create(document.getElementById('monaco-container'), {
+                value: localStorage.getItem('omnicode-saved-code') || initialCode,
+                language: 'javascript',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: false },
+                fontSize: 14,
+                wordWrap: 'on',
+                padding: { top: 16 }
+            });
+
+            // Auto save code to localstorage
+            monacoEditor.onDidChangeModelContent(() => {
+                localStorage.setItem('omnicode-saved-code', monacoEditor.getValue());
+                updateStatusBar();
+            });
+
+            // Update cursor position
+            monacoEditor.onDidChangeCursorPosition((e) => {
+                document.getElementById('status-line').innerText = `Baris ${e.position.lineNumber}, Lajur ${e.position.column}`;
+            });
+
+            // Keyboard shortcuts
+            monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+                runCode();
+            });
+
+            monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                showNotification('Kod disimpan secara automatik!');
+            });
+
+            updateStatusBar();
+        });
+
+        // Tab Management
+        function switchTab(tabId) {
+            // Update Navigation UI
+            ['editor', 'chat', 'settings'].forEach(id => {
+                const btn = document.getElementById(`nav-${id}`);
+                btn.classList.remove('text-white', 'active-tab');
+                if (id === tabId) btn.classList.add('text-white', 'active-tab');
+            });
+
+            // Update Views (Using z-index and opacity to avoid Monaco layout breaking)
+            ['editor', 'chat', 'settings'].forEach(id => {
+                const view = document.getElementById(`view-${id}`);
+                if (id === tabId) {
+                    view.classList.replace('z-0', 'z-10');
+                    view.classList.replace('opacity-0', 'opacity-100');
+                    view.classList.remove('pointer-events-none');
+                } else {
+                    view.classList.replace('z-10', 'z-0');
+                    view.classList.replace('opacity-100', 'opacity-0');
+                    view.classList.add('pointer-events-none');
+                }
+            });
+
+            currentTab = tabId;
+            
+            // Fix Monaco layout on resize/show
+            if (tabId === 'editor' && monacoEditor) {
+                setTimeout(() => monacoEditor.layout(), 100);
+            }
+        }
+
+        // Settings Management
+        function loadSettings() {
+            document.getElementById('setting-url').value = localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions';
+            document.getElementById('setting-key').value = localStorage.getItem('omnicode-key') || '';
+            document.getElementById('setting-model').value = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
+            document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
+        }
+
+        function saveSettings() {
+            localStorage.setItem('omnicode-url', document.getElementById('setting-url').value);
+            localStorage.setItem('omnicode-key', document.getElementById('setting-key').value);
+            localStorage.setItem('omnicode-model', document.getElementById('setting-model').value);
+            localStorage.setItem('omnicode-prompt', document.getElementById('setting-prompt').value);
+            
+            showNotification('Tetapan berjaya disimpan!');
+        }
+
+        function showNotification(msg) {
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-vsblue text-white px-4 py-2 rounded shadow-lg z-50 text-sm transition-opacity opacity-0';
+            toast.innerText = msg;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => toast.classList.replace('opacity-0', 'opacity-100'), 10);
+            setTimeout(() => {
+                toast.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Status Bar
+        function updateStatusBar() {
+            if (!monacoEditor) return;
+            const code = monacoEditor.getValue();
+            document.getElementById('status-size').innerText = `${code.length} aksara`;
+            
+            // Detect language from code
+            const lang = detectLanguage(code);
+            if (lang !== currentLanguage) {
+                currentLanguage = lang;
+                monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
+                updateFileIcon(lang);
+            }
+        }
+
+        function detectLanguage(code) {
+            if (code.trim().startsWith('<!DOCTYPE') || code.trim().startsWith('<html')) return 'html';
+            if (code.includes('def ') && code.includes(':')) return 'python';
+            if (code.includes('function') || code.includes('=>') || code.includes('console.log')) return 'javascript';
+            if (code.includes('interface ') || code.includes(': string') || code.includes(': number')) return 'typescript';
+            if (code.trim().startsWith('{') && code.includes('":')) return 'json';
+            if (code.includes('# ') && code.includes('\n')) return 'markdown';
+            if (code.includes('{') && code.includes('}') && code.includes(':') && !code.includes('function')) return 'css';
+            return 'javascript';
+        }
+
+        function updateFileIcon(lang) {
+            const info = langMap[lang] || langMap['javascript'];
+            const iconEl = document.getElementById('file-icon');
+            const nameEl = document.getElementById('file-name');
+            const langEl = document.getElementById('status-lang');
+            
+            iconEl.className = `${info.icon} ${info.color} mr-2`;
+            nameEl.innerText = `main.${info.ext}`;
+            langEl.innerText = lang.charAt(0).toUpperCase() + lang.slice(1);
+        }
+
+        // Editor Actions
+        function clearEditor() {
+            if (confirm('Adakah anda pasti mahu mengosongkan editor? Tindakan ini tidak boleh diundur.')) {
+                monacoEditor.setValue('');
+                showNotification('Editor dikosongkan!');
+            }
+        }
+
+        function runCode() {
+            const code = monacoEditor.getValue();
+            const lang = currentLanguage;
+            
+            if (lang === 'html') {
+                openPreview(code);
+            } else if (lang === 'javascript') {
+                const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }</style>
+</head>
+<body>
+    <div id="output"></div>
+    <script>
+        const output = document.getElementById('output');
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            output.innerHTML += args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') + '<br>';
+        };
+        window.onerror = function(msg, url, line) {
+            output.innerHTML += '<span style="color:#f48771">Ralat: ' + msg + ' (Baris ' + line + ')</span><br>';
+        };
+        try {
+            ${code}
+        } catch(e) {
+            output.innerHTML += '<span style="color:#f48771">Ralat: ' + e.message + '</span><br>';
+        }
+    <\/script>
+</body>
+</html>`;
+                openPreview(html);
+            } else {
+                showNotification('Hanya HTML dan JavaScript boleh dijalankan pada masa ini.');
+            }
+        }
+
+        function openPreview(html) {
+            const modal = document.getElementById('preview-modal');
+            const frame = document.getElementById('preview-frame');
+            frame.srcdoc = html;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closePreview() {
+            const modal = document.getElementById('preview-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // Chat & AI Integration
+        async function sendChatMessage() {
+            if (isSending) return;
+            
+            const inputEl = document.getElementById('chat-input');
+            const prompt = inputEl.value.trim();
+            if (!prompt) return;
+
+            // Check settings first
+            const url = localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions';
+            const key = localStorage.getItem('omnicode-key') || '';
+            const model = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
+            const sysPrompt = localStorage.getItem('omnicode-prompt') || '';
+            const currentCode = monacoEditor ? monacoEditor.getValue() : '';
+
+            if (!key && url.includes('openai.com')) {
+                appendMessage('system', 'Ralat: Kunci API tidak ditemui. Sila masukkan di tab Tetapan.');
+                switchTab('settings');
+                return;
+            }
+
+            // Set sending state
+            isSending = true;
+            const sendBtn = document.getElementById('btn-send');
+            sendBtn.disabled = true;
+            sendBtn.classList.add('sending');
+            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>';
+
+            // Clear input and reset height
+            inputEl.value = '';
+            inputEl.style.height = 'auto';
+
+            // Add user message to UI
+            appendMessage('user', prompt);
+
+            // Create placeholder for AI response
+            const responseId = 'msg-' + Date.now();
+            appendMessage('ai', 'Sedang memikirkan...', responseId, true);
+
+            // Construct payload (OpenAI Standard Format)
+            const payload = {
+                model: model,
+                messages: [
+                    { 
+                        role: "system", 
+                        content: sysPrompt + "\n\nKonteks kod fail semasa (main." + (langMap[currentLanguage]?.ext || 'js') + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
+                    },
+                    ...chatHistory.slice(-5), // Keep last 5 messages for context
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.7
+            };
+
+            chatHistory.push({ role: "user", content: prompt });
+
+            try {
+                // Add timeout to fetch
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${key}`
+                    },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => '');
+                    throw new Error(`Ralat pelayan ${response.status}: ${errorText || response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                    throw new Error('Format respons tidak dijangka dari pelayan.');
+                }
+
+                const aiText = data.choices[0].message.content;
+                
+                chatHistory.push({ role: "assistant", content: aiText });
+                updateMessage(responseId, aiText);
+
+            } catch (error) {
+                let errorMsg = 'Ralat penyambungan: ';
+                if (error.name === 'AbortError') {
+                    errorMsg += 'Permintaan tamat masa (60 saat). Cuba lagi.';
+                } else if (error.message.includes('Failed to fetch')) {
+                    errorMsg += 'Tidak dapat menyambung ke pelayan. Semak sambungan internet dan URL endpoint.';
+                } else {
+                    errorMsg += error.message;
+                }
+                errorMsg += '\n\nSemak Tetapan AI anda.';
+                updateMessage(responseId, errorMsg);
+            } finally {
+                // Reset sending state
+                isSending = false;
+                sendBtn.disabled = false;
+                sendBtn.classList.remove('sending');
+                sendBtn.innerHTML = '<i class="fas fa-paper-plane text-xs"></i>';
+            }
+        }
+
+        function clearChat() {
+            if (confirm('Adakah anda pasti mahu mengosongkan sejarah chat?')) {
+                const chatBox = document.getElementById('chat-history');
+                chatBox.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-full bg-vsblue flex items-center justify-center shrink-0">
+                            <i class="fas fa-robot text-white text-xs"></i>
+                        </div>
+                        <div class="bg-vsnav border border-vsborder rounded-lg rounded-tl-none p-3 max-w-[85%]">
+                            <p class="text-sm">Helo! Saya sedia membantu anda mengekod. Pastikan anda telah mengkonfigurasi <b>Tetapan AI</b> terlebih dahulu.</p>
+                        </div>
+                    </div>
+                `;
+                chatHistory = [];
+                showNotification('Chat dikosongkan!');
+            }
+        }
+
+        function appendMessage(role, text, id = null, isPending = false) {
+            const chatBox = document.getElementById('chat-history');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'flex items-start gap-3 w-full';
+            if (id) msgDiv.id = id;
+
+            if (role === 'user') {
+                msgDiv.classList.add('flex-row-reverse');
+                msgDiv.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center shrink-0">
+                        <i class="fas fa-user text-white text-xs"></i>
+                    </div>
+                    <div class="bg-blue-600 rounded-lg rounded-tr-none p-3 max-w-[85%] text-white">
+                        <p class="text-sm whitespace-pre-wrap">${escapeHTML(text)}</p>
+                    </div>
+                `;
+            } else {
+                let parsedHTML = text;
+                if (!isPending) {
+                    parsedHTML = marked.parse(text); // parse markdown
+                }
+                
+                msgDiv.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-vsblue flex items-center justify-center shrink-0">
+                        <i class="fas ${isPending ? 'fa-spinner fa-spin' : 'fa-robot'} text-white text-xs"></i>
+                    </div>
+                    <div class="bg-vsnav border border-vsborder rounded-lg rounded-tl-none p-3 max-w-[85%] overflow-hidden prose prose-invert prose-sm">
+                        ${parsedHTML}
+                    </div>
+                `;
+            }
+
+            chatBox.appendChild(msgDiv);
+            scrollToBottom();
+            
+            // Add copy/insert buttons to code blocks
+            if (!isPending && role === 'ai') addCodeBlockButtons(msgDiv);
+        }
+
+        function updateMessage(id, text) {
+            const msgDiv = document.getElementById(id);
+            if (!msgDiv) return;
+            
+            const iconBox = msgDiv.querySelector('.fa-spinner');
+            if (iconBox) {
+                iconBox.classList.replace('fa-spinner', 'fa-robot');
+                iconBox.classList.remove('fa-spin');
+            }
+
+            const contentBox = msgDiv.querySelector('.prose');
+            contentBox.innerHTML = marked.parse(text);
+            
+            scrollToBottom();
+            addCodeBlockButtons(msgDiv);
+        }
+
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag])
+            );
+        }
+
+        function scrollToBottom() {
+            const chatBox = document.getElementById('chat-history');
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function addCodeBlockButtons(container) {
+            const codeBlocks = container.querySelectorAll('pre');
+            codeBlocks.forEach((pre, index) => {
+                const btnContainer = document.createElement('div');
+                btnContainer.className = 'absolute top-2 right-2 flex gap-2';
+
+                // Copy Button
+                const copyBtn = document.createElement('button');
+                copyBtn.innerHTML = '<i class="fas fa-copy"></i>';
+                copyBtn.className = 'text-xs bg-gray-700 hover:bg-vsblue text-white w-7 h-7 rounded flex items-center justify-center transition-colors shadow';
+                copyBtn.title = 'Salin kod';
+                copyBtn.onclick = () => {
+                    const code = pre.querySelector('code').innerText;
+                    navigator.clipboard.writeText(code).then(() => {
+                        showNotification('Kod disalin!');
+                    }).catch(() => {
+                        // Fallback
+                        const textarea = document.createElement('textarea');
+                        textarea.value = code;
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                        showNotification('Kod disalin!');
+                    });
+                };
+
+                // Append/Insert to Editor Button
+                const insertBtn = document.createElement('button');
+                insertBtn.innerHTML = '<i class="fas fa-file-import"></i>';
+                insertBtn.className = 'text-xs bg-gray-700 hover:bg-vsblue text-white w-7 h-7 rounded flex items-center justify-center transition-colors shadow';
+                insertBtn.title = 'Masukkan ke Penyunting';
+                insertBtn.onclick = () => {
+                    const code = pre.querySelector('code').innerText;
+                    if (monacoEditor) {
+                        const position = monacoEditor.getPosition();
+                        monacoEditor.executeEdits("ai-chat", [{
+                            range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                            text: code + '\n',
+                            forceMoveMarkers: true
+                        }]);
+                        showNotification('Kod berjaya dimasukkan!');
+                        switchTab('editor'); // Jump back to editor
+                    }
+                };
+
+                btnContainer.appendChild(copyBtn);
+                btnContainer.appendChild(insertBtn);
+                pre.appendChild(btnContainer);
+            });
+        }
+
+        // Initialize App
+        window.onload = () => {
+            loadSettings();
+            
+            // Allow Enter to send chat
+            document.getElementById('chat-input').addEventListener('keypress', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendChatMessage();
+                }
+            });
+
+            // Handle escape key for preview modal
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    closePreview();
+                }
+            });
+
+            // Prevent zoom on double tap for iOS
+            let lastTouchEnd = 0;
+            document.addEventListener('touchend', function(e) {
+                const now = Date.now();
+                if (now - lastTouchEnd <= 300) {
+                    e.preventDefault();
+                }
+                lastTouchEnd = now;
+            }, false);
+        };
+
+    </script>
+</body>
+</html>
