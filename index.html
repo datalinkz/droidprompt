@@ -20,6 +20,7 @@
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     
     <script>
         tailwind.config = {
@@ -494,9 +495,11 @@
         let currentLanguage = 'javascript';
         let firebaseApp = null;
         let firebaseAuth = null;
+        let firestoreDb = null;
         let currentUser = null;
         let promptHistory = [];
         let chatMode = 'code';
+        let isSyncing = false;
 
         // Chat mode system prompts
         const chatModes = {
@@ -850,6 +853,16 @@ helloWorld();
                         projectId: projectId
                     });
                     firebaseAuth = firebase.auth();
+                    firestoreDb = firebase.firestore();
+                    
+                    // Enable offline persistence
+                    firestoreDb.enablePersistence({ synchronizeTabs: true }).catch((err) => {
+                        if (err.code === 'failed-precondition') {
+                            console.warn('Firestore persistence failed: multiple tabs open');
+                        } else if (err.code === 'unimplemented') {
+                            console.warn('Firestore persistence not supported by browser');
+                        }
+                    });
                     
                     // Listen for auth state changes
                     firebaseAuth.onAuthStateChanged(handleAuthStateChange);
@@ -1098,20 +1111,129 @@ helloWorld();
         }
 
         // ============================================
-        // PROMPT HISTORY (per user)
+        // CLOUD SYNC (FIRESTORE)
         // ============================================
-        function loadPromptHistory() {
-            const saved = localStorage.getItem(getUserKey('droidlink-prompt-history'));
-            if (saved) {
-                try {
-                    promptHistory = JSON.parse(saved);
-                } catch (e) {
+        async function syncHistoryToCloud() {
+            if (!firestoreDb || !currentUser || isSyncing) return;
+            
+            isSyncing = true;
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                await userRef.set({
+                    promptHistory: promptHistory,
+                    lastSync: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log('History synced to cloud');
+            } catch (error) {
+                console.warn('Failed to sync history to cloud:', error);
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        async function loadHistoryFromCloud() {
+            if (!firestoreDb || !currentUser) return false;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const doc = await userRef.get();
+                
+                if (doc.exists && doc.data().promptHistory) {
+                    const cloudHistory = doc.data().promptHistory;
+                    if (Array.isArray(cloudHistory) && cloudHistory.length > 0) {
+                        promptHistory = cloudHistory;
+                        // Also save to local as backup
+                        localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
+                        renderHistoryList();
+                        return true;
+                    }
+                }
+            } catch (error) {
+                console.warn('Failed to load history from cloud:', error);
+            }
+            return false;
+        }
+
+        async function syncChatToCloud() {
+            if (!firestoreDb || !currentUser || chatHistory.length === 0) return;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const chatBox = document.getElementById('chat-history');
+                
+                await userRef.set({
+                    chatConversation: {
+                        history: chatHistory,
+                        html: chatBox.innerHTML,
+                        savedAt: new Date().toISOString()
+                    },
+                    lastSync: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log('Chat synced to cloud');
+            } catch (error) {
+                console.warn('Failed to sync chat to cloud:', error);
+            }
+        }
+
+        async function loadChatFromCloud() {
+            if (!firestoreDb || !currentUser) return false;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const doc = await userRef.get();
+                
+                if (doc.exists && doc.data().chatConversation) {
+                    const data = doc.data().chatConversation;
+                    
+                    // Restore chat history array
+                    if (data.history && Array.isArray(data.history)) {
+                        chatHistory = data.history;
+                    }
+                    
+                    // Restore chat UI
+                    if (data.html) {
+                        const chatBox = document.getElementById('chat-history');
+                        chatBox.innerHTML = data.html;
+                        
+                        // Re-add code block buttons
+                        chatBox.querySelectorAll('.prose').forEach(prose => {
+                            const msgDiv = prose.closest('.flex.items-start');
+                            if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
+                                addCodeBlockButtons(msgDiv);
+                            }
+                        });
+                        
+                        scrollToBottom();
+                    }
+                    return true;
+                }
+            } catch (error) {
+                console.warn('Failed to load chat from cloud:', error);
+            }
+            return false;
+        }
+
+        // ============================================
+        // PROMPT HISTORY (per user + cloud sync)
+        // ============================================
+        async function loadPromptHistory() {
+            // Try cloud first
+            const cloudLoaded = await loadHistoryFromCloud();
+            
+            if (!cloudLoaded) {
+                // Fallback to local
+                const saved = localStorage.getItem(getUserKey('droidlink-prompt-history'));
+                if (saved) {
+                    try {
+                        promptHistory = JSON.parse(saved);
+                    } catch (e) {
+                        promptHistory = [];
+                    }
+                } else {
                     promptHistory = [];
                 }
-            } else {
-                promptHistory = [];
+                renderHistoryList();
             }
-            renderHistoryList();
         }
 
         function savePromptToHistory(prompt) {
@@ -1129,8 +1251,12 @@ helloWorld();
                 promptHistory = promptHistory.slice(0, 100); // Keep last 100
             }
             
+            // Save locally
             localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
             renderHistoryList();
+            
+            // Sync to cloud
+            syncHistoryToCloud();
         }
 
         function renderHistoryList() {
@@ -1188,6 +1314,7 @@ helloWorld();
             promptHistory = promptHistory.filter(e => e.id !== id);
             localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
             renderHistoryList();
+            syncHistoryToCloud();
             showNotification('Prompt dipadam!');
         }
 
@@ -1196,6 +1323,7 @@ helloWorld();
                 promptHistory = [];
                 localStorage.removeItem(getUserKey('droidlink-prompt-history'));
                 renderHistoryList();
+                syncHistoryToCloud();
                 showNotification('Semua sejarah dipadam!');
             }
         }
@@ -1623,7 +1751,7 @@ helloWorld();
         }
 
         // ============================================
-        // CHAT CONVERSATION PERSISTENCE (per user)
+        // CHAT CONVERSATION PERSISTENCE (per user + cloud sync)
         // ============================================
         function saveChatConversation() {
             if (!currentUser) return;
@@ -1636,44 +1764,54 @@ helloWorld();
                 savedAt: new Date().toISOString()
             };
             
+            // Save locally
             try {
                 localStorage.setItem(getUserKey('droidlink-chat-conversation'), JSON.stringify(data));
             } catch (e) {
-                console.warn('Failed to save chat conversation:', e);
+                console.warn('Failed to save chat conversation locally:', e);
             }
+            
+            // Sync to cloud
+            syncChatToCloud();
         }
 
-        function loadChatConversation() {
+        async function loadChatConversation() {
             if (!currentUser) return;
             
-            const saved = localStorage.getItem(getUserKey('droidlink-chat-conversation'));
-            if (!saved) return;
+            // Try cloud first
+            const cloudLoaded = await loadChatFromCloud();
             
-            try {
-                const data = JSON.parse(saved);
+            if (!cloudLoaded) {
+                // Fallback to local
+                const saved = localStorage.getItem(getUserKey('droidlink-chat-conversation'));
+                if (!saved) return;
                 
-                // Restore chat history array
-                if (data.history && Array.isArray(data.history)) {
-                    chatHistory = data.history;
-                }
-                
-                // Restore chat UI
-                if (data.html) {
-                    const chatBox = document.getElementById('chat-history');
-                    chatBox.innerHTML = data.html;
+                try {
+                    const data = JSON.parse(saved);
                     
-                    // Re-add code block buttons to restored messages
-                    chatBox.querySelectorAll('.prose').forEach(prose => {
-                        const msgDiv = prose.closest('.flex.items-start');
-                        if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
-                            addCodeBlockButtons(msgDiv);
-                        }
-                    });
+                    // Restore chat history array
+                    if (data.history && Array.isArray(data.history)) {
+                        chatHistory = data.history;
+                    }
                     
-                    scrollToBottom();
+                    // Restore chat UI
+                    if (data.html) {
+                        const chatBox = document.getElementById('chat-history');
+                        chatBox.innerHTML = data.html;
+                        
+                        // Re-add code block buttons to restored messages
+                        chatBox.querySelectorAll('.prose').forEach(prose => {
+                            const msgDiv = prose.closest('.flex.items-start');
+                            if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
+                                addCodeBlockButtons(msgDiv);
+                            }
+                        });
+                        
+                        scrollToBottom();
+                    }
+                } catch (e) {
+                    console.warn('Failed to load chat conversation:', e);
                 }
-            } catch (e) {
-                console.warn('Failed to load chat conversation:', e);
             }
         }
 
@@ -1692,6 +1830,7 @@ helloWorld();
                 `;
                 chatHistory = [];
                 localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
+                syncChatToCloud(); // Clear cloud too
                 showNotification('Chat dikosongkan!');
             }
         }
