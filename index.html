@@ -916,12 +916,16 @@ helloWorld();
         }
 
         function signOut() {
+            // Save chat before signing out
+            saveChatConversation();
+            
             if (firebaseAuth) {
                 firebaseAuth.signOut().catch((error) => {
                     console.error('Sign out error:', error);
                 });
             }
             currentUser = null;
+            chatHistory = [];
             updateUserUI();
             showAuthLogin();
         }
@@ -934,6 +938,7 @@ helloWorld();
                     hideAuthGate();
                     updateUserUI();
                     loadPromptHistory();
+                    loadChatConversation();
                 } else {
                     // Sign out unauthorized user immediately
                     firebaseAuth.signOut().then(() => {
@@ -961,10 +966,20 @@ helloWorld();
         }
 
         // ============================================
-        // PROMPT HISTORY
+        // PER-USER STORAGE HELPERS
+        // ============================================
+        function getUserKey(baseKey) {
+            if (currentUser && currentUser.email) {
+                return baseKey + '-' + currentUser.email.toLowerCase().replace(/[^a-z0-9]/g, '-');
+            }
+            return baseKey;
+        }
+
+        // ============================================
+        // PROMPT HISTORY (per user)
         // ============================================
         function loadPromptHistory() {
-            const saved = localStorage.getItem('omnicode-prompt-history');
+            const saved = localStorage.getItem(getUserKey('droidlink-prompt-history'));
             if (saved) {
                 try {
                     promptHistory = JSON.parse(saved);
@@ -992,7 +1007,7 @@ helloWorld();
                 promptHistory = promptHistory.slice(0, 100); // Keep last 100
             }
             
-            localStorage.setItem('omnicode-prompt-history', JSON.stringify(promptHistory));
+            localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
             renderHistoryList();
         }
 
@@ -1049,7 +1064,7 @@ helloWorld();
 
         function deleteHistoryPrompt(id) {
             promptHistory = promptHistory.filter(e => e.id !== id);
-            localStorage.setItem('omnicode-prompt-history', JSON.stringify(promptHistory));
+            localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
             renderHistoryList();
             showNotification('Prompt dipadam!');
         }
@@ -1057,7 +1072,7 @@ helloWorld();
         function clearAllHistory() {
             if (confirm('Adakah anda pasti mahu memadam semua sejarah prompt?')) {
                 promptHistory = [];
-                localStorage.removeItem('omnicode-prompt-history');
+                localStorage.removeItem(getUserKey('droidlink-prompt-history'));
                 renderHistoryList();
                 showNotification('Semua sejarah dipadam!');
             }
@@ -1416,6 +1431,9 @@ helloWorld();
             };
 
             chatHistory.push({ role: "user", content: prompt });
+            
+            // Auto-save conversation after user sends
+            saveChatConversation();
 
             try {
                 const controller = new AbortController();
@@ -1455,6 +1473,9 @@ helloWorld();
                 
                 chatHistory.push({ role: "assistant", content: aiText });
                 updateMessage(responseId, aiText);
+                
+                // Auto-save conversation after AI responds
+                saveChatConversation();
 
             } catch (error) {
                 let errorMsg = 'Ralat penyambungan: ';
@@ -1479,6 +1500,61 @@ helloWorld();
             }
         }
 
+        // ============================================
+        // CHAT CONVERSATION PERSISTENCE (per user)
+        // ============================================
+        function saveChatConversation() {
+            if (!currentUser) return;
+            if (chatHistory.length === 0) return;
+            
+            const chatBox = document.getElementById('chat-history');
+            const data = {
+                history: chatHistory,
+                html: chatBox.innerHTML,
+                savedAt: new Date().toISOString()
+            };
+            
+            try {
+                localStorage.setItem(getUserKey('droidlink-chat-conversation'), JSON.stringify(data));
+            } catch (e) {
+                console.warn('Failed to save chat conversation:', e);
+            }
+        }
+
+        function loadChatConversation() {
+            if (!currentUser) return;
+            
+            const saved = localStorage.getItem(getUserKey('droidlink-chat-conversation'));
+            if (!saved) return;
+            
+            try {
+                const data = JSON.parse(saved);
+                
+                // Restore chat history array
+                if (data.history && Array.isArray(data.history)) {
+                    chatHistory = data.history;
+                }
+                
+                // Restore chat UI
+                if (data.html) {
+                    const chatBox = document.getElementById('chat-history');
+                    chatBox.innerHTML = data.html;
+                    
+                    // Re-add code block buttons to restored messages
+                    chatBox.querySelectorAll('.prose').forEach(prose => {
+                        const msgDiv = prose.closest('.flex.items-start');
+                        if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
+                            addCodeBlockButtons(msgDiv);
+                        }
+                    });
+                    
+                    scrollToBottom();
+                }
+            } catch (e) {
+                console.warn('Failed to load chat conversation:', e);
+            }
+        }
+
         function clearChat() {
             if (confirm('Adakah anda pasti mahu mengosongkan sejarah chat?')) {
                 const chatBox = document.getElementById('chat-history');
@@ -1493,6 +1569,7 @@ helloWorld();
                     </div>
                 `;
                 chatHistory = [];
+                localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
                 showNotification('Chat dikosongkan!');
             }
         }
@@ -1740,6 +1817,18 @@ helloWorld();
                     const iosModal = document.getElementById('ios-install-modal');
                     if (iosModal) iosModal.remove();
                 }
+            });
+
+            // Auto-save chat when page is hidden/closed
+            document.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'hidden') {
+                    saveChatConversation();
+                }
+            });
+
+            // Auto-save before page unload
+            window.addEventListener('beforeunload', function() {
+                saveChatConversation();
             });
 
             let lastTouchEnd = 0;
