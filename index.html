@@ -436,6 +436,18 @@
                         <textarea id="setting-prompt" rows="3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">Anda adalah pembantu pengaturcaraan pakar (expert coding assistant). Jawab dengan padat dan berikan kod yang lengkap.</textarea>
                     </div>
 
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Timeout (saat)</label>
+                        <select id="setting-timeout" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                            <option value="30">30 saat</option>
+                            <option value="60" selected>60 saat</option>
+                            <option value="120">120 saat (2 minit)</option>
+                            <option value="180">180 saat (3 minit)</option>
+                            <option value="300">300 saat (5 minit)</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">Masa maksimum menunggu respons AI. Model besar perlukan masa lebih lama.</p>
+                    </div>
+
                     <button onclick="saveSettings()" class="w-full py-2 bg-vsblue hover:bg-blue-600 text-white rounded font-medium transition-colors">
                         Simpan Tetapan
                     </button>
@@ -1654,6 +1666,7 @@ helloWorld();
             document.getElementById('setting-model').value = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
             document.getElementById('setting-use-proxy').checked = localStorage.getItem('omnicode-use-proxy') !== 'false';
+            document.getElementById('setting-timeout').value = localStorage.getItem('omnicode-timeout') || '60';
             
             // Firebase settings
             document.getElementById('setting-firebase-apiKey').value = localStorage.getItem('firebase-apiKey') || '';
@@ -1667,6 +1680,7 @@ helloWorld();
             const model = document.getElementById('setting-model').value.trim();
             const prompt = document.getElementById('setting-prompt').value.trim();
             const useProxy = document.getElementById('setting-use-proxy').checked;
+            const timeout = document.getElementById('setting-timeout').value;
             
             // Auto-append /chat/completions if not present and URL ends with /v1
             if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
@@ -1678,6 +1692,7 @@ helloWorld();
             localStorage.setItem('omnicode-model', model);
             localStorage.setItem('omnicode-prompt', prompt);
             localStorage.setItem('omnicode-use-proxy', useProxy);
+            localStorage.setItem('omnicode-timeout', timeout);
             
             showNotification('Tetapan berjaya disimpan!');
         }
@@ -1889,12 +1904,18 @@ helloWorld();
             const responseId = 'msg-' + Date.now();
             appendMessage('ai', 'Sedang memikirkan...', responseId, true);
 
+            // Limit code context to prevent timeout (max 4000 chars)
+            let codeContext = currentCode;
+            if (currentCode.length > 4000) {
+                codeContext = currentCode.substring(0, 4000) + '\n\n... [kod dipendekkan untuk mengelakkan timeout] ...';
+            }
+
             const payload = {
                 model: model,
                 messages: [
                     { 
                         role: "system", 
-                        content: getChatModePrompt() + "\n\n" + sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + currentCode + "\n```"
+                        content: getChatModePrompt() + "\n\n" + sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + codeContext + "\n```"
                     },
                     ...chatHistory.slice(-5),
                     { role: "user", content: prompt }
@@ -1909,7 +1930,8 @@ helloWorld();
 
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 60000);
+                const timeoutSeconds = parseInt(localStorage.getItem('omnicode-timeout') || '60');
+                const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
                 // Use proxy if enabled
                 const fetchUrl = getProxiedUrl(finalUrl);
@@ -1951,8 +1973,14 @@ helloWorld();
 
             } catch (error) {
                 let errorMsg = 'Ralat penyambungan: ';
+                const timeoutSeconds = parseInt(localStorage.getItem('omnicode-timeout') || '60');
                 if (error.name === 'AbortError') {
-                    errorMsg += 'Permintaan tamat masa (60 saat). Cuba lagi.';
+                    errorMsg += 'Permintaan tamat masa (' + timeoutSeconds + ' saat). Cuba lagi atau tingkatkan timeout di Tetapan.';
+                } else if (error.message.includes('504') || error.message.includes('timeout')) {
+                    errorMsg += 'Pelayan timeout (504). Model AI mengambil masa terlalu lama.\n\nCadangan:\n';
+                    errorMsg += '• Guna model yang lebih kecil/pantas\n';
+                    errorMsg += '• Kosongkan chat untuk mengurangkan konteks\n';
+                    errorMsg += '• Tingkatkan timeout di Tetapan';
                 } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || error.message.includes('Load failed')) {
                     errorMsg += 'Tidak dapat menyambung ke pelayan. Kemungkinan:\n';
                     errorMsg += '1. URL endpoint tidak lengkap (perlu /chat/completions)\n';
