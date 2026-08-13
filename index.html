@@ -414,7 +414,7 @@
                         <label class="flex items-center cursor-pointer">
                             <input type="checkbox" id="setting-use-proxy" class="mr-2 rounded" checked>
                             <div>
-                                <span class="text-sm font-medium text-yellow-300">Guna CORS Proxy</span>
+                                <span class="text-sm font-medium text-yellow-300">Guna CORS Proxy (cors.sh)</span>
                                 <p class="text-xs text-gray-400">Aktifkan jika mendapat ralat "Failed to fetch" atau CORS. Percuma dan selamat.</p>
                             </div>
                         </label>
@@ -1700,7 +1700,8 @@ helloWorld();
         function getProxiedUrl(url) {
             const useProxy = localStorage.getItem('omnicode-use-proxy') !== 'false';
             if (useProxy) {
-                return 'https://corsproxy.io/?' + encodeURIComponent(url);
+                // Use cors.sh proxy (free, reliable)
+                return 'https://proxy.cors.sh/' + url;
             }
             return url;
         }
