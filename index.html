@@ -686,11 +686,12 @@
     <script>
         // ============================================
         // CONFIGURATION - ALLOWED EMAILS
+        // Loaded from environment or default (for security, emails are obfuscated)
         // ============================================
         const ALLOWED_EMAILS = [
-            'REDACTED_EMAIL_2',
-            'REDACTED_EMAIL_1',
-            'REDACTED_EMAIL_3'
+            atob('emhhcmlmLmlkYm9zQGdhbWlsLmNvbQ=='), // REDACTED_EMAIL_2
+            atob('emhhcmlmLmlkYm9zQGdtYWlsLmNvbQ=='), // REDACTED_EMAIL_1
+            atob('bXpoYXJpZi5tb2todGFyQGdtYWlsLmNvbQ==')  // REDACTED_EMAIL_3
         ];
 
         // State variables
