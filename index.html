@@ -294,6 +294,10 @@
                     <span class="text-sm font-medium">Pembantu AI</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="manualSyncToCloud()" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Simpan perbualan ke cloud sekarang">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span class="hidden sm:inline">Sync</span>
+                    </button>
                     <button onclick="toggleHistoryPanel()" class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Lihat sejarah prompt">
                         <i class="fas fa-history"></i>
                         <span class="hidden sm:inline">Sejarah</span>
@@ -547,6 +551,63 @@
                     </button>
                     <button onclick="savePastedCode()" class="flex-1 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium transition-colors">
                         <i class="fas fa-save mr-1"></i>Simpan Fail
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save AI Code to File Modal -->
+    <div id="save-file-modal" class="fixed inset-0 bg-black bg-opacity-80 z-[100] hidden flex-col p-4">
+        <div class="bg-vsnav border border-vsborder rounded-lg max-w-md w-full mx-auto my-auto max-h-[90vh] flex flex-col">
+            <div class="h-12 border-b border-vsborder flex items-center justify-between px-4 shrink-0">
+                <div class="flex items-center">
+                    <i class="fas fa-save text-green-400 mr-2"></i>
+                    <span class="text-sm font-medium text-white">Simpan Kod AI sebagai Fail</span>
+                </div>
+                <button onclick="closeSaveFileModal()" class="text-gray-400 hover:text-white p-2">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="p-4 space-y-4 overflow-y-auto flex-1">
+                <!-- Code preview -->
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-300">Kod</label>
+                    <pre id="save-code-preview" class="bg-[#1e1e1e] border border-vsborder rounded p-3 text-xs text-gray-300 max-h-32 overflow-y-auto font-mono"></pre>
+                </div>
+
+                <!-- Filename input -->
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-300">Nama Fail</label>
+                    <input type="text" id="save-filename" placeholder="cth: index.html, script.js, utils.py" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                </div>
+
+                <!-- Folder selection -->
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-300">Folder (pilihan)</label>
+                    <div class="flex gap-2">
+                        <select id="save-folder-select" class="flex-1 bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <option value="">(Root - tiada folder)</option>
+                        </select>
+                        <input type="text" id="save-folder-new" placeholder="Atau folder baharu..." class="flex-1 bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- Preview path -->
+                <div class="bg-[#1e1e1e] border border-vsborder rounded p-3">
+                    <p class="text-xs text-gray-500 mb-1">Laluan penuh:</p>
+                    <p class="text-sm text-green-400 font-mono" id="save-preview-path">fail.js</p>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-vsborder shrink-0">
+                <div class="flex gap-2">
+                    <button onclick="closeSaveFileModal()" class="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors">
+                        Batal
+                    </button>
+                    <button onclick="confirmSaveToFile()" class="flex-1 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium transition-colors">
+                        <i class="fas fa-save mr-1"></i>Simpan
                     </button>
                 </div>
             </div>
@@ -1037,6 +1098,141 @@
             }
             updatePastePreviewPath();
         });
+
+        // ============================================
+        // SAVE AI CODE TO FILE
+        // ============================================
+        let pendingSaveCode = '';
+
+        function showSaveToFileModal(code) {
+            pendingSaveCode = code;
+            
+            const modal = document.getElementById('save-file-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // Show code preview (first 10 lines)
+            const preview = code.split('\n').slice(0, 10).join('\n');
+            document.getElementById('save-code-preview').textContent = preview + (code.split('\n').length > 10 ? '\n...' : '');
+            
+            // Reset form
+            document.getElementById('save-filename').value = '';
+            document.getElementById('save-folder-new').value = '';
+            document.getElementById('save-folder-select').value = '';
+            updateSavePreviewPath();
+            loadSaveFolderOptions();
+            
+            // Auto-suggest filename based on code
+            const detected = detectCodeLanguage(code);
+            if (detected) {
+                document.getElementById('save-filename').placeholder = 'cth: ' + detected.name.toLowerCase() + '.' + detected.ext;
+            }
+            
+            setTimeout(() => document.getElementById('save-filename').focus(), 100);
+        }
+
+        function closeSaveFileModal() {
+            const modal = document.getElementById('save-file-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            pendingSaveCode = '';
+        }
+
+        function loadSaveFolderOptions() {
+            const select = document.getElementById('save-folder-select');
+            const folders = new Set();
+            
+            Object.keys(workspaceFiles).forEach(path => {
+                const parts = path.split('/');
+                if (parts.length > 1) {
+                    for (let i = 1; i < parts.length; i++) {
+                        folders.add(parts.slice(0, i).join('/') + '/');
+                    }
+                }
+            });
+            
+            select.innerHTML = '<option value="">(Root - tiada folder)</option>';
+            Array.from(folders).sort().forEach(folder => {
+                const opt = document.createElement('option');
+                opt.value = folder;
+                opt.textContent = folder;
+                select.appendChild(opt);
+            });
+        }
+
+        function updateSavePreviewPath() {
+            const filename = document.getElementById('save-filename').value.trim();
+            const folderSelect = document.getElementById('save-folder-select').value;
+            const folderNew = document.getElementById('save-folder-new').value.trim();
+            
+            let folder = '';
+            if (folderNew) {
+                folder = folderNew.endsWith('/') ? folderNew : folderNew + '/';
+            } else if (folderSelect) {
+                folder = folderSelect;
+            }
+            
+            const path = folder + (filename || 'fail.js');
+            document.getElementById('save-preview-path').textContent = path;
+        }
+
+        function confirmSaveToFile() {
+            let filename = document.getElementById('save-filename').value.trim();
+            const folderSelect = document.getElementById('save-folder-select').value;
+            const folderNew = document.getElementById('save-folder-new').value.trim();
+            
+            if (!pendingSaveCode) {
+                showNotification('Tiada kod untuk disimpan!');
+                return;
+            }
+            
+            if (!filename) {
+                const detected = detectCodeLanguage(pendingSaveCode);
+                if (detected) {
+                    filename = 'ai-generated.' + detected.ext;
+                } else {
+                    filename = 'ai-generated.txt';
+                }
+            }
+            
+            let folder = '';
+            if (folderNew) {
+                folder = folderNew.endsWith('/') ? folderNew : folderNew + '/';
+            } else if (folderSelect) {
+                folder = folderSelect;
+            }
+            
+            const fullPath = folder + filename;
+            
+            if (workspaceFiles.hasOwnProperty(fullPath)) {
+                if (!confirm('Fail "' + fullPath + '" sudah wujud. Gantikan?')) {
+                    return;
+                }
+            }
+            
+            workspaceFiles[fullPath] = pendingSaveCode;
+            saveWorkspaceFiles();
+            renderFileList();
+            openFile(fullPath);
+            closeSaveFileModal();
+            showNotification('Fail "' + fullPath + '" berjaya disimpan!');
+        }
+
+        // Event listeners for save file modal
+        document.getElementById('save-filename').addEventListener('input', updateSavePreviewPath);
+        document.getElementById('save-folder-select').addEventListener('change', function() {
+            if (this.value) {
+                document.getElementById('save-folder-new').value = '';
+            }
+            updateSavePreviewPath();
+        });
+        document.getElementById('save-folder-new').addEventListener('input', function() {
+            if (this.value) {
+                document.getElementById('save-folder-select').value = '';
+            }
+            updateSavePreviewPath();
+        });
+
         const initialCode = `// Selamat datang ke DroidLink
 // 1. Pergi ke tab 'Fail' untuk muat naik fail/folder dari peranti anda.
 // 2. Pergi ke tab 'Tetapan' untuk set API AI.
@@ -1406,6 +1602,31 @@ helloWorld();
                 console.log('Chat synced to cloud');
             } catch (error) {
                 console.warn('Failed to sync chat to cloud:', error);
+            }
+        }
+
+        async function manualSyncToCloud() {
+            if (!firestoreDb || !currentUser) {
+                showNotification('Sila log masuk terlebih dahulu.');
+                return;
+            }
+            
+            if (chatHistory.length === 0 && promptHistory.length === 0) {
+                showNotification('Tiada data untuk disimpan.');
+                return;
+            }
+            
+            showNotification('Menyimpan ke cloud...');
+            
+            try {
+                await Promise.all([
+                    syncHistoryToCloud(),
+                    syncChatToCloud()
+                ]);
+                showNotification('Semua data berjaya disimpan ke cloud!');
+            } catch (error) {
+                console.error('Manual sync error:', error);
+                showNotification('Ralat menyimpan ke cloud. Cuba lagi.');
             }
         }
 
@@ -2201,8 +2422,19 @@ helloWorld();
                     }
                 };
 
+                // Save as File Button
+                const saveBtn = document.createElement('button');
+                saveBtn.innerHTML = '<i class="fas fa-save"></i>';
+                saveBtn.className = 'text-xs bg-purple-700 hover:bg-purple-600 text-white w-7 h-7 rounded flex items-center justify-center transition-colors shadow';
+                saveBtn.title = 'Simpan sebagai Fail';
+                saveBtn.onclick = () => {
+                    const code = pre.querySelector('code').innerText;
+                    showSaveToFileModal(code);
+                };
+
                 btnContainer.appendChild(copyBtn);
                 btnContainer.appendChild(insertBtn);
+                btnContainer.appendChild(saveBtn);
                 pre.appendChild(btnContainer);
             });
         }
