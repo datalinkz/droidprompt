@@ -1301,14 +1301,9 @@ helloWorld();
                     firebaseAuth = firebase.auth();
                     firestoreDb = firebase.firestore();
                     
-                    // Enable offline persistence
-                    firestoreDb.enablePersistence({ synchronizeTabs: true }).catch((err) => {
-                        if (err.code === 'failed-precondition') {
-                            console.warn('Firestore persistence failed: multiple tabs open');
-                        } else if (err.code === 'unimplemented') {
-                            console.warn('Firestore persistence not supported by browser');
-                        }
-                    });
+                    // Disable offline persistence to always get fresh data from server
+                    // (fixes sync issue between devices where cache shows stale data)
+                    firebase.firestore().settings({ cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED });
                     
                     // Listen for auth state changes
                     firebaseAuth.onAuthStateChanged(handleAuthStateChange);
@@ -1435,6 +1430,9 @@ helloWorld();
         }
 
         function signOut() {
+            // Stop real-time sync
+            stopRealtimeSync();
+            
             // Save chat before signing out
             saveChatConversation();
             
@@ -1459,8 +1457,10 @@ helloWorld();
                     loadPromptHistory();
                     loadChatConversation();
                     loadChatMode();
+                    
+                    // Start real-time listener for cross-device sync
+                    startRealtimeSync();
                 } else {
-                    // Sign out unauthorized user immediately
                     firebaseAuth.signOut().then(() => {
                         currentUser = null;
                         showAuthDenied();
@@ -1469,6 +1469,69 @@ helloWorld();
             } else {
                 currentUser = null;
                 showAuthLogin();
+            }
+        }
+
+        // ============================================
+        // REAL-TIME SYNC (Firestore onSnapshot)
+        // ============================================
+        let realtimeUnsubscribe = null;
+
+        function startRealtimeSync() {
+            if (!firestoreDb || !currentUser) return;
+            
+            // Unsubscribe previous listener if any
+            if (realtimeUnsubscribe) {
+                realtimeUnsubscribe();
+            }
+            
+            const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+            
+            // Listen for real-time updates
+            realtimeUnsubscribe = userRef.onSnapshot((doc) => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    
+                    // Sync prompt history
+                    if (data.promptHistory && Array.isArray(data.promptHistory)) {
+                        if (JSON.stringify(data.promptHistory) !== JSON.stringify(promptHistory)) {
+                            promptHistory = data.promptHistory;
+                            localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
+                            renderHistoryList();
+                            console.log('Real-time sync: history updated');
+                        }
+                    }
+                    
+                    // Sync chat conversation
+                    if (data.chatConversation && data.chatConversation.html) {
+                        const chatBox = document.getElementById('chat-history');
+                        const currentHtml = chatBox.innerHTML;
+                        
+                        if (data.chatConversation.html !== currentHtml) {
+                            chatHistory = data.chatConversation.history || [];
+                            chatBox.innerHTML = data.chatConversation.html;
+                            
+                            chatBox.querySelectorAll('.prose').forEach(prose => {
+                                const msgDiv = prose.closest('.flex.items-start');
+                                if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
+                                    addCodeBlockButtons(msgDiv);
+                                }
+                            });
+                            
+                            scrollToBottom();
+                            console.log('Real-time sync: chat updated');
+                        }
+                    }
+                }
+            }, (error) => {
+                console.warn('Real-time sync error:', error);
+            });
+        }
+
+        function stopRealtimeSync() {
+            if (realtimeUnsubscribe) {
+                realtimeUnsubscribe();
+                realtimeUnsubscribe = null;
             }
         }
 
@@ -1564,16 +1627,16 @@ helloWorld();
             
             try {
                 const userRef = firestoreDb.collection('users').doc(currentUser.uid);
-                const doc = await userRef.get();
+                // Force read from server (not cache) to get latest data from other devices
+                const doc = await userRef.get({ source: 'server' });
                 
                 if (doc.exists && doc.data().promptHistory) {
                     const cloudHistory = doc.data().promptHistory;
                     if (Array.isArray(cloudHistory) && cloudHistory.length > 0) {
                         promptHistory = cloudHistory;
-                        // Also save to local as backup
                         localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
                         renderHistoryList();
-                        console.log('History loaded from cloud:', promptHistory.length, 'items');
+                        console.log('History loaded from cloud (server):', promptHistory.length, 'items');
                         return true;
                     }
                 }
@@ -1675,22 +1738,20 @@ helloWorld();
             
             try {
                 const userRef = firestoreDb.collection('users').doc(currentUser.uid);
-                const doc = await userRef.get();
+                // Force read from server (not cache) to get latest data from other devices
+                const doc = await userRef.get({ source: 'server' });
                 
                 if (doc.exists && doc.data().chatConversation) {
                     const data = doc.data().chatConversation;
                     
-                    // Restore chat history array
                     if (data.history && Array.isArray(data.history)) {
                         chatHistory = data.history;
                     }
                     
-                    // Restore chat UI
                     if (data.html) {
                         const chatBox = document.getElementById('chat-history');
                         chatBox.innerHTML = data.html;
                         
-                        // Re-add code block buttons
                         chatBox.querySelectorAll('.prose').forEach(prose => {
                             const msgDiv = prose.closest('.flex.items-start');
                             if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
@@ -1700,7 +1761,7 @@ helloWorld();
                         
                         scrollToBottom();
                     }
-                    console.log('Chat loaded from cloud:', chatHistory.length, 'messages');
+                    console.log('Chat loaded from cloud (server):', chatHistory.length, 'messages');
                     return true;
                 }
             } catch (error) {
