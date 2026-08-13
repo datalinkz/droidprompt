@@ -308,6 +308,10 @@
                         <i class="fas fa-cloud-upload-alt"></i>
                         <span class="hidden sm:inline">Sync</span>
                     </button>
+                    <button onclick="showChatSessions()" class="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Sejarah perbualan terdahulu">
+                        <i class="fas fa-comments"></i>
+                        <span class="hidden sm:inline">Sesi</span>
+                    </button>
                     <button onclick="toggleHistoryPanel()" class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Lihat sejarah prompt">
                         <i class="fas fa-history"></i>
                         <span class="hidden sm:inline">Sejarah</span>
@@ -447,8 +451,21 @@
                     
                     <div>
                         <label class="block text-sm font-medium mb-1">Nama Model</label>
-                        <input type="text" id="setting-model" placeholder="cth: gpt-3.5-turbo atau llama3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
-                        <p class="text-xs text-gray-500 mt-1">Model pantas: deepseek-v4-flash, glm-5.1. Model berkuasa: kimi-k3, deepseek-v4-pro (lebih lambat).</p>
+                        <div class="flex gap-2">
+                            <input type="text" id="setting-model" placeholder="cth: gpt-3.5-turbo atau llama3" class="flex-1 bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                            <select id="setting-model-list" onchange="document.getElementById('setting-model').value = this.value" class="bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none w-40">
+                                <option value="">Pilih Model</option>
+                                <option value="deepseek-v4-flash">deepseek-v4-flash (Pantas)</option>
+                                <option value="glm-5.1">glm-5.1 (Pantas)</option>
+                                <option value="glm-5.2">glm-5.2</option>
+                                <option value="kimi-k2.7">kimi-k2.7</option>
+                                <option value="kimi-k3">kimi-k3 (Berkuasa)</option>
+                                <option value="deepseek-v4-pro">deepseek-v4-pro (Berkuasa)</option>
+                                <option value="minimax-m3">minimax-m3</option>
+                                <option value="hy3-tencent">hy3-tencent</option>
+                            </select>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">Pilih dari senarai atau taip nama model sendiri.</p>
                     </div>
 
                     <div>
@@ -1546,6 +1563,8 @@ helloWorld();
                     loadPromptHistory();
                     loadChatConversation();
                     loadChatMode();
+                    loadSettingsFromCloud();
+                    loadChatSessions();
                     
                     // Start real-time listener for cross-device sync
                     startRealtimeSync();
@@ -1634,6 +1653,51 @@ helloWorld();
                             updateSyncStatus();
                         }
                     }
+
+                    // Sync AI settings
+                    if (data.aiSettings) {
+                        const cloudSettings = data.aiSettings;
+                        const localUrl = localStorage.getItem('omnicode-url') || '';
+                        
+                        if (cloudSettings.url && cloudSettings.url !== localUrl) {
+                            if (cloudSettings.url) localStorage.setItem('omnicode-url', cloudSettings.url);
+                            if (cloudSettings.model) localStorage.setItem('omnicode-model', cloudSettings.model);
+                            if (cloudSettings.prompt) localStorage.setItem('omnicode-prompt', cloudSettings.prompt);
+                            if (cloudSettings.useProxy !== undefined) localStorage.setItem('omnicode-use-proxy', cloudSettings.useProxy);
+                            if (cloudSettings.timeout) localStorage.setItem('omnicode-timeout', cloudSettings.timeout);
+                            if (cloudSettings.useStream !== undefined) localStorage.setItem('omnicode-stream', cloudSettings.useStream);
+                            
+                            loadSettings();
+                            console.log('Real-time sync: settings updated');
+                            updateSyncStatus();
+                        }
+                    }
+
+                    // Sync chat mode
+                    if (data.chatMode && chatModes[data.chatMode] && data.chatMode !== chatMode) {
+                        chatMode = data.chatMode;
+                        localStorage.setItem(getUserKey('droidlink-chat-mode'), chatMode);
+                        
+                        Object.keys(chatModes).forEach(m => {
+                            const btn = document.getElementById('mode-' + m);
+                            if (btn) {
+                                btn.classList.remove('active');
+                                if (m === chatMode) btn.classList.add('active');
+                            }
+                        });
+                        
+                        console.log('Real-time sync: chat mode updated');
+                        updateSyncStatus();
+                    }
+
+                    // Sync chat sessions
+                    if (data.chatSessions && Array.isArray(data.chatSessions)) {
+                        if (JSON.stringify(data.chatSessions) !== JSON.stringify(chatSessions)) {
+                            chatSessions = data.chatSessions;
+                            localStorage.setItem(getUserKey('droidlink-chat-sessions'), JSON.stringify(chatSessions));
+                            console.log('Real-time sync: sessions updated');
+                        }
+                    }
                 }
             }, (error) => {
                 console.warn('Real-time sync error:', error);
@@ -1700,6 +1764,9 @@ helloWorld();
             inputEl.placeholder = placeholders[mode] || 'Tanya AI atau arahkan jana kod...';
             
             showNotification('Mod ' + chatModes[mode].name + ' diaktifkan!');
+            
+            // Sync mode to cloud
+            syncSettingsToCloud();
         }
 
         function loadChatMode() {
@@ -2136,6 +2203,79 @@ helloWorld();
             localStorage.setItem('omnicode-stream', useStream);
             
             showNotification('Tetapan berjaya disimpan!');
+            
+            // Sync settings to cloud
+            syncSettingsToCloud();
+        }
+
+        // ============================================
+        // CLOUD SYNC FOR SETTINGS & MODE
+        // ============================================
+        async function syncSettingsToCloud() {
+            if (!firestoreDb || !currentUser) return;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                await userRef.set({
+                    aiSettings: {
+                        url: localStorage.getItem('omnicode-url') || '',
+                        model: localStorage.getItem('omnicode-model') || '',
+                        prompt: localStorage.getItem('omnicode-prompt') || '',
+                        useProxy: localStorage.getItem('omnicode-use-proxy') !== 'false',
+                        timeout: localStorage.getItem('omnicode-timeout') || '60',
+                        useStream: localStorage.getItem('omnicode-stream') === 'true'
+                    },
+                    chatMode: chatMode,
+                    lastSettingsSync: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log('Settings synced to cloud');
+            } catch (error) {
+                console.warn('Failed to sync settings to cloud:', error);
+            }
+        }
+
+        async function loadSettingsFromCloud() {
+            if (!firestoreDb || !currentUser) return false;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const doc = await userRef.get({ source: 'server' });
+                
+                if (doc.exists && doc.data().aiSettings) {
+                    const settings = doc.data().aiSettings;
+                    
+                    // Load settings
+                    if (settings.url) localStorage.setItem('omnicode-url', settings.url);
+                    if (settings.model) localStorage.setItem('omnicode-model', settings.model);
+                    if (settings.prompt) localStorage.setItem('omnicode-prompt', settings.prompt);
+                    if (settings.useProxy !== undefined) localStorage.setItem('omnicode-use-proxy', settings.useProxy);
+                    if (settings.timeout) localStorage.setItem('omnicode-timeout', settings.timeout);
+                    if (settings.useStream !== undefined) localStorage.setItem('omnicode-stream', settings.useStream);
+                    
+                    // Load chat mode
+                    if (doc.data().chatMode && chatModes[doc.data().chatMode]) {
+                        chatMode = doc.data().chatMode;
+                        localStorage.setItem(getUserKey('droidlink-chat-mode'), chatMode);
+                        
+                        // Update UI
+                        Object.keys(chatModes).forEach(m => {
+                            const btn = document.getElementById('mode-' + m);
+                            if (btn) {
+                                btn.classList.remove('active');
+                                if (m === chatMode) btn.classList.add('active');
+                            }
+                        });
+                    }
+                    
+                    // Reload settings form
+                    loadSettings();
+                    console.log('Settings loaded from cloud');
+                    return true;
+                }
+            } catch (error) {
+                console.warn('Failed to load settings from cloud:', error);
+            }
+            return false;
         }
 
         function getProxiedUrl(url) {
@@ -2569,8 +2709,169 @@ helloWorld();
             }
         }
 
+        // ============================================
+        // CHAT SESSIONS (ARCHIVE)
+        // ============================================
+        let chatSessions = [];
+
+        function saveChatSession() {
+            if (chatHistory.length === 0) return;
+            
+            const chatBox = document.getElementById('chat-history');
+            const session = {
+                id: Date.now(),
+                title: chatHistory[0]?.content?.substring(0, 50) || 'Perbualan Baharu',
+                history: [...chatHistory],
+                html: chatBox.innerHTML,
+                timestamp: new Date().toISOString(),
+                mode: chatMode
+            };
+            
+            chatSessions.unshift(session);
+            if (chatSessions.length > 50) {
+                chatSessions = chatSessions.slice(0, 50);
+            }
+            
+            localStorage.setItem(getUserKey('droidlink-chat-sessions'), JSON.stringify(chatSessions));
+            syncSessionsToCloud();
+        }
+
+        async function syncSessionsToCloud() {
+            if (!firestoreDb || !currentUser) return;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                await userRef.set({
+                    chatSessions: chatSessions,
+                    lastSessionSync: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log('Sessions synced to cloud');
+            } catch (error) {
+                console.warn('Failed to sync sessions to cloud:', error);
+            }
+        }
+
+        async function loadSessionsFromCloud() {
+            if (!firestoreDb || !currentUser) return false;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const doc = await userRef.get({ source: 'server' });
+                
+                if (doc.exists && doc.data().chatSessions) {
+                    const cloudSessions = doc.data().chatSessions;
+                    if (Array.isArray(cloudSessions) && cloudSessions.length > 0) {
+                        chatSessions = cloudSessions;
+                        localStorage.setItem(getUserKey('droidlink-chat-sessions'), JSON.stringify(chatSessions));
+                        return true;
+                    }
+                }
+            } catch (error) {
+                console.warn('Failed to load sessions from cloud:', error);
+            }
+            return false;
+        }
+
+        function loadChatSessions() {
+            const saved = localStorage.getItem(getUserKey('droidlink-chat-sessions'));
+            if (saved) {
+                try {
+                    chatSessions = JSON.parse(saved);
+                } catch (e) {
+                    chatSessions = [];
+                }
+            } else {
+                chatSessions = [];
+            }
+        }
+
+        function showChatSessions() {
+            loadChatSessions();
+            
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-80 z-[300] flex items-center justify-center p-4';
+            modal.id = 'sessions-modal';
+            
+            let sessionsHtml = '';
+            if (chatSessions.length === 0) {
+                sessionsHtml = '<p class="text-xs text-gray-500 text-center py-4">Tiada sejarah perbualan.</p>';
+            } else {
+                sessionsHtml = chatSessions.map((session, index) => `
+                    <div class="bg-[#1e1e1e] border border-vsborder rounded-lg p-3 hover:border-vsblue transition-colors cursor-pointer" onclick="loadChatSession(${index})">
+                        <p class="text-sm text-white mb-1 font-medium">${escapeHTML(session.title)}</p>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-gray-500">${formatDate(session.timestamp)}</span>
+                            <span class="text-[10px] bg-vsblue text-white px-2 py-0.5 rounded">${session.mode || 'code'}</span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            modal.innerHTML = `
+                <div class="bg-vsnav border border-vsborder rounded-lg max-w-md w-full max-h-[80vh] flex flex-col">
+                    <div class="h-12 border-b border-vsborder flex items-center justify-between px-4 shrink-0">
+                        <div class="flex items-center">
+                            <i class="fas fa-comments text-purple-400 mr-2"></i>
+                            <span class="text-sm font-medium text-white">Sejarah Perbualan</span>
+                        </div>
+                        <button onclick="document.getElementById('sessions-modal').remove()" class="text-gray-400 hover:text-white p-2">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                        ${sessionsHtml}
+                    </div>
+                    <div class="p-3 border-t border-vsborder">
+                        <button onclick="document.getElementById('sessions-modal').remove()" class="w-full py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors">
+                            Tutup
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        function loadChatSession(index) {
+            const session = chatSessions[index];
+            if (!session) return;
+            
+            // Save current session first
+            if (chatHistory.length > 0) {
+                saveChatSession();
+            }
+            
+            // Load selected session
+            chatHistory = session.history || [];
+            
+            const chatBox = document.getElementById('chat-history');
+            chatBox.innerHTML = session.html || '';
+            
+            // Re-add code block buttons
+            chatBox.querySelectorAll('.prose').forEach(prose => {
+                const msgDiv = prose.closest('.flex.items-start');
+                if (msgDiv && !msgDiv.classList.contains('flex-row-reverse')) {
+                    addCodeBlockButtons(msgDiv);
+                }
+            });
+            
+            // Set mode if available
+            if (session.mode && chatModes[session.mode]) {
+                setChatMode(session.mode);
+            }
+            
+            scrollToBottom();
+            document.getElementById('sessions-modal').remove();
+            showNotification('Perbualan dimuatkan!');
+        }
+
         function clearChat() {
-            if (confirm('Adakah anda pasti mahu mengosongkan sejarah chat?')) {
+            if (confirm('Adakah anda pasti mahu mengosongkan chat semasa? Perbualan akan disimpan ke sejarah.')) {
+                // Save to sessions before clearing
+                if (chatHistory.length > 0) {
+                    saveChatSession();
+                }
+                
                 const chatBox = document.getElementById('chat-history');
                 chatBox.innerHTML = `
                     <div class="flex items-start gap-3">
@@ -2585,7 +2886,7 @@ helloWorld();
                 chatHistory = [];
                 localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
                 syncChatToCloud(); // Clear cloud too
-                showNotification('Chat dikosongkan!');
+                showNotification('Chat dikosongkan dan disimpan ke sejarah!');
             }
         }
 
