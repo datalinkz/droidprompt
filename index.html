@@ -432,7 +432,7 @@
                     <div>
                         <label class="block text-sm font-medium mb-1">Nama Model</label>
                         <input type="text" id="setting-model" placeholder="cth: gpt-3.5-turbo atau llama3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
-                        <p class="text-xs text-gray-500 mt-1">Model tersedia di rootsys.cloud: kimi-k3, glm-5.2, deepseek-v4-pro, dll.</p>
+                        <p class="text-xs text-gray-500 mt-1">Model pantas: deepseek-v4-flash, glm-5.1. Model berkuasa: kimi-k3, deepseek-v4-pro (lebih lambat).</p>
                     </div>
 
                     <div>
@@ -450,6 +450,16 @@
                             <option value="300">300 saat (5 minit)</option>
                         </select>
                         <p class="text-xs text-gray-500 mt-1">Masa maksimum menunggu respons AI. Model besar perlukan masa lebih lama.</p>
+                    </div>
+
+                    <div class="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="checkbox" id="setting-stream" class="mr-2 rounded">
+                            <div>
+                                <span class="text-sm font-medium text-blue-300">Mod Streaming (Beta)</span>
+                                <p class="text-xs text-gray-400">Paparkan respons secara beransur-ansur. Lebih pantas untuk interaksi, tetapi mungkin tidak stabil untuk semua model.</p>
+                            </div>
+                        </label>
                     </div>
 
                     <button onclick="saveSettings()" class="w-full py-2 bg-vsblue hover:bg-blue-600 text-white rounded font-medium transition-colors">
@@ -1888,6 +1898,7 @@ helloWorld();
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
             document.getElementById('setting-use-proxy').checked = localStorage.getItem('omnicode-use-proxy') !== 'false';
             document.getElementById('setting-timeout').value = localStorage.getItem('omnicode-timeout') || '60';
+            document.getElementById('setting-stream').checked = localStorage.getItem('omnicode-stream') === 'true';
             
             // Firebase settings
             document.getElementById('setting-firebase-apiKey').value = localStorage.getItem('firebase-apiKey') || '';
@@ -1902,6 +1913,7 @@ helloWorld();
             const prompt = document.getElementById('setting-prompt').value.trim();
             const useProxy = document.getElementById('setting-use-proxy').checked;
             const timeout = document.getElementById('setting-timeout').value;
+            const useStream = document.getElementById('setting-stream').checked;
             
             // Auto-append /chat/completions if not present and URL ends with /v1
             if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
@@ -1914,6 +1926,7 @@ helloWorld();
             localStorage.setItem('omnicode-prompt', prompt);
             localStorage.setItem('omnicode-use-proxy', useProxy);
             localStorage.setItem('omnicode-timeout', timeout);
+            localStorage.setItem('omnicode-stream', useStream);
             
             showNotification('Tetapan berjaya disimpan!');
         }
@@ -2126,10 +2139,10 @@ helloWorld();
             const responseId = 'msg-' + Date.now();
             appendMessage('ai', 'Sedang memikirkan...', responseId, true);
 
-            // Limit code context to prevent timeout (max 4000 chars)
+            // Limit code context to prevent timeout (max 2000 chars for faster response)
             let codeContext = currentCode;
-            if (currentCode.length > 4000) {
-                codeContext = currentCode.substring(0, 4000) + '\n\n... [kod dipendekkan untuk mengelakkan timeout] ...';
+            if (currentCode.length > 2000) {
+                codeContext = currentCode.substring(0, 2000) + '\n\n... [kod dipendekkan untuk respons lebih pantas] ...';
             }
 
             const payload = {
@@ -2139,11 +2152,18 @@ helloWorld();
                         role: "system", 
                         content: getChatModePrompt() + "\n\n" + sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + codeContext + "\n```"
                     },
-                    ...chatHistory.slice(-5),
+                    ...chatHistory.slice(-3), // Keep last 3 messages only for faster context
                     { role: "user", content: prompt }
                 ],
-                temperature: 0.7
+                temperature: 0.7,
+                max_tokens: 2048 // Limit response length for faster generation
             };
+
+            // Add streaming flag if enabled
+            const useStream = localStorage.getItem('omnicode-stream') === 'true';
+            if (useStream) {
+                payload.stream = true;
+            }
 
             chatHistory.push({ role: "user", content: prompt });
             
@@ -2179,19 +2199,25 @@ helloWorld();
                     throw new Error(`Ralat pelayan ${response.status}: ${errorText || response.statusText}`);
                 }
 
-                const data = await response.json();
-                
-                if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-                    throw new Error('Format respons tidak dijangka dari pelayan.');
-                }
+                if (useStream) {
+                    // Handle streaming response
+                    await handleStreamingResponse(response, responseId);
+                } else {
+                    // Handle normal response
+                    const data = await response.json();
+                    
+                    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                        throw new Error('Format respons tidak dijangka dari pelayan.');
+                    }
 
-                const aiText = data.choices[0].message.content;
-                
-                chatHistory.push({ role: "assistant", content: aiText });
-                updateMessage(responseId, aiText);
-                
-                // Auto-save conversation after AI responds
-                saveChatConversation();
+                    const aiText = data.choices[0].message.content;
+                    
+                    chatHistory.push({ role: "assistant", content: aiText });
+                    updateMessage(responseId, aiText);
+                    
+                    // Auto-save conversation after AI responds
+                    saveChatConversation();
+                }
 
             } catch (error) {
                 let errorMsg = 'Ralat penyambungan: ';
@@ -2360,6 +2386,68 @@ helloWorld();
             
             scrollToBottom();
             addCodeBlockButtons(msgDiv);
+        }
+
+        // Streaming response handler
+        async function handleStreamingResponse(response, responseId) {
+            const msgDiv = document.getElementById(responseId);
+            if (!msgDiv) return;
+            
+            const iconBox = msgDiv.querySelector('.fa-spinner');
+            if (iconBox) {
+                iconBox.classList.replace('fa-spinner', 'fa-robot');
+                iconBox.classList.remove('fa-spin');
+            }
+
+            const contentBox = msgDiv.querySelector('.prose');
+            let fullText = '';
+            let buffer = '';
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data === '[DONE]') continue;
+
+                            try {
+                                const parsed = JSON.parse(data);
+                                const content = parsed.choices?.[0]?.delta?.content || '';
+                                if (content) {
+                                    fullText += content;
+                                    // Update UI with partial text (render as plain text first for speed)
+                                    contentBox.innerHTML = marked.parse(fullText);
+                                    scrollToBottom();
+                                }
+                            } catch (e) {
+                                // Skip invalid JSON lines
+                            }
+                        }
+                    }
+                }
+
+                // Final update with full markdown parsing
+                contentBox.innerHTML = marked.parse(fullText);
+                addCodeBlockButtons(msgDiv);
+                
+                // Save to history
+                chatHistory.push({ role: "assistant", content: fullText });
+                saveChatConversation();
+                
+            } catch (error) {
+                console.error('Streaming error:', error);
+                contentBox.innerHTML = '<p class="text-red-400">Ralat semasa streaming: ' + error.message + '</p>';
+            }
         }
 
         function escapeHTML(str) {
