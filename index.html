@@ -234,6 +234,10 @@
                         <i class="fas fa-download"></i>
                         <span class="hidden sm:inline">Muat Turun</span>
                     </button>
+                    <button onclick="previewApp()" class="text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Pratonton aplikasi (gabung semua fail)">
+                        <i class="fas fa-mobile-alt"></i>
+                        <span class="hidden sm:inline">App</span>
+                    </button>
                     <button onclick="runCode()" id="btn-run" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Jalankan kod (Ctrl+Enter)">
                         <i class="fas fa-play"></i>
                         <span class="hidden sm:inline">Jalankan</span>
@@ -342,6 +346,11 @@
                     <button onclick="setChatMode('debug')" id="mode-debug" class="chat-mode-btn text-xs px-3 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1">
                         <i class="fas fa-bug text-[10px]"></i>
                         <span>Nyahpepijat</span>
+                    </button>
+                    <span class="text-gray-600 mx-1">|</span>
+                    <button onclick="toggleAutoEdit()" id="btn-auto-edit" class="chat-mode-btn text-xs px-3 py-1.5 rounded-full transition-colors shrink-0 flex items-center gap-1" title="AI akan terus sunting kod dalam editor">
+                        <i class="fas fa-magic text-[10px]"></i>
+                        <span>Auto-Sunting</span>
                     </button>
                 </div>
             </div>
@@ -696,13 +705,14 @@
         let currentUser = null;
         let promptHistory = [];
         let chatMode = 'code';
+        let autoEdit = false;
         let isSyncing = false;
 
         // Chat mode system prompts
         const chatModes = {
             code: {
                 name: 'Kod',
-                prompt: 'Anda adalah pembantu pengaturcaraan pakar (expert coding assistant). Fokus pada menulis kod yang lengkap, bersih, dan mengikut best practices. Jawab dengan kod yang boleh terus digunakan. Sertakan penjelasan ringkas jika perlu, tetapi utamakan kod.'
+                prompt: 'Anda adalah pembantu pengaturcaraan pakar (expert coding assistant). Fokus pada menulis kod yang lengkap, bersih, dan mengikut best practices. Jawab dengan kod yang boleh terus digunakan. Sertakan penjelasan ringkas jika perlu, tetapi utamakan kod. PENTING: Apabila diminta mengubah suai kod, pulangkan kod fail yang LENGKAP (bukan sebahagian), supaya ia boleh terus menggantikan fail asal.'
             },
             ask: {
                 name: 'Tanya',
@@ -1563,6 +1573,7 @@ helloWorld();
                     loadPromptHistory();
                     loadChatConversation();
                     loadChatMode();
+                    loadAutoEdit();
                     loadSettingsFromCloud();
                     loadChatSessions();
                     
@@ -2072,6 +2083,72 @@ helloWorld();
             panel.classList.toggle('open');
         }
 
+        // ============================================
+        // AUTO-EDIT MODE
+        // ============================================
+        function toggleAutoEdit() {
+            autoEdit = !autoEdit;
+            const btn = document.getElementById('btn-auto-edit');
+            if (autoEdit) {
+                btn.classList.add('active');
+                showNotification('Auto-Sunting AKTIF - AI akan terus sunting kod anda!');
+            } else {
+                btn.classList.remove('active');
+                showNotification('Auto-Sunting dimatikan.');
+            }
+            localStorage.setItem(getUserKey('droidlink-auto-edit'), autoEdit);
+        }
+
+        function loadAutoEdit() {
+            const saved = localStorage.getItem(getUserKey('droidlink-auto-edit'));
+            autoEdit = saved === 'true';
+            const btn = document.getElementById('btn-auto-edit');
+            if (btn && autoEdit) {
+                btn.classList.add('active');
+            }
+        }
+
+        // Extract code blocks from AI response
+        function extractCodeBlocks(text) {
+            const blocks = [];
+            const regex = /```(\w*)\n([\s\S]*?)```/g;
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                blocks.push({
+                    lang: match[1] || 'plaintext',
+                    code: match[2].trim()
+                });
+            }
+            return blocks;
+        }
+
+        // Auto-apply AI code to current file
+        function autoApplyCode(aiText) {
+            if (!autoEdit || !monacoEditor) return false;
+            
+            const blocks = extractCodeBlocks(aiText);
+            if (blocks.length === 0) return false;
+            
+            // Use the largest code block (likely the complete file)
+            let mainBlock = blocks[0];
+            for (const block of blocks) {
+                if (block.code.length > mainBlock.code.length) {
+                    mainBlock = block;
+                }
+            }
+            
+            // Only auto-apply if the block is substantial (likely a complete file)
+            if (mainBlock.code.length < 20) return false;
+            
+            // Apply to editor
+            workspaceFiles[currentFileName] = mainBlock.code;
+            monacoEditor.setValue(mainBlock.code);
+            saveWorkspaceFiles();
+            
+            showNotification('Kod AI telah disunting terus ke "' + currentFileName + '"!');
+            return true;
+        }
+
         function formatDate(isoString) {
             const date = new Date(isoString);
             return date.toLocaleDateString('ms-MY') + ' ' + date.toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' });
@@ -2485,6 +2562,78 @@ helloWorld();
         }
 
         // ============================================
+        // APP PREVIEW (Combine all workspace files)
+        // ============================================
+        function previewApp() {
+            // Find main HTML file
+            let mainHtml = null;
+            let mainHtmlName = '';
+            
+            // Priority: index.html > *.html (first)
+            if (workspaceFiles['index.html']) {
+                mainHtml = workspaceFiles['index.html'];
+                mainHtmlName = 'index.html';
+            } else {
+                for (const [name, content] of Object.entries(workspaceFiles)) {
+                    if (name.endsWith('.html') || name.endsWith('.htm')) {
+                        mainHtml = content;
+                        mainHtmlName = name;
+                        break;
+                    }
+                }
+            }
+
+            if (!mainHtml) {
+                showNotification('Tiada fail HTML dijumpai. Cipta index.html terlebih dahulu.');
+                return;
+            }
+
+            let processedHtml = mainHtml;
+
+            // Inline CSS files (replace <link rel="stylesheet" href="...">)
+            processedHtml = processedHtml.replace(
+                /<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi,
+                (match, href) => {
+                    // Remove leading ./
+                    const cleanPath = href.replace(/^\.\//, '');
+                    if (workspaceFiles[cleanPath]) {
+                        return '<style>\n' + workspaceFiles[cleanPath] + '\n</style>';
+                    }
+                    return match; // Keep external links
+                }
+            );
+
+            // Inline JS files (replace <script src="...">)
+            processedHtml = processedHtml.replace(
+                /<script[^>]*src=["']([^"']+)["'][^>]*><\/script>/gi,
+                (match, src) => {
+                    const cleanPath = src.replace(/^\.\//, '');
+                    if (workspaceFiles[cleanPath]) {
+                        return '<script>\n' + workspaceFiles[cleanPath] + '\n<\/script>';
+                    }
+                    return match; // Keep external scripts
+                }
+            );
+
+            // If no <link> or <script> tags found, try appending style.css and script.js
+            if (!processedHtml.includes('<style>') && workspaceFiles['style.css']) {
+                processedHtml = processedHtml.replace(
+                    /<\/head>/i,
+                    '<style>\n' + workspaceFiles['style.css'] + '\n</style>\n</head>'
+                );
+            }
+            if (!processedHtml.includes('workspaceFiles') && workspaceFiles['script.js'] && !processedHtml.includes('script.js')) {
+                processedHtml = processedHtml.replace(
+                    /<\/body>/i,
+                    '<script>\n' + workspaceFiles['script.js'] + '\n<\/script>\n</body>'
+                );
+            }
+
+            openPreview(processedHtml);
+            showNotification('Pratonton aplikasi dari "' + mainHtmlName + '"!');
+        }
+
+        // ============================================
         // CHAT & AI INTEGRATION
         // ============================================
         async function sendChatMessage() {
@@ -2608,6 +2757,9 @@ helloWorld();
                     
                     chatHistory.push({ role: "assistant", content: aiText });
                     updateMessage(responseId, aiText);
+                    
+                    // Auto-apply code to editor if auto-edit is enabled
+                    autoApplyCode(aiText);
                     
                     // Auto-save conversation after AI responds
                     saveChatConversation();
@@ -3001,6 +3153,9 @@ helloWorld();
                 chatHistory.push({ role: "assistant", content: fullText });
                 saveChatConversation();
                 
+                // Auto-apply code to editor if auto-edit is enabled
+                autoApplyCode(fullText);
+                
             } catch (error) {
                 console.error('Streaming error:', error);
                 contentBox.innerHTML = '<p class="text-red-400">Ralat semasa streaming: ' + error.message + '</p>';
@@ -3077,9 +3232,28 @@ helloWorld();
                     showSaveToFileModal(code);
                 };
 
+                // Replace Current File Button
+                const replaceBtn = document.createElement('button');
+                replaceBtn.innerHTML = '<i class="fas fa-exchange-alt"></i>';
+                replaceBtn.className = 'text-xs bg-green-700 hover:bg-green-600 text-white w-7 h-7 rounded flex items-center justify-center transition-colors shadow';
+                replaceBtn.title = 'Ganti Fail Semasa';
+                replaceBtn.onclick = () => {
+                    const code = pre.querySelector('code').innerText;
+                    if (monacoEditor) {
+                        if (confirm('Gantikan kandungan fail "' + currentFileName + '" dengan kod ini?')) {
+                            workspaceFiles[currentFileName] = code;
+                            monacoEditor.setValue(code);
+                            saveWorkspaceFiles();
+                            showNotification('Fail "' + currentFileName + '" digantikan!');
+                            switchTab('editor');
+                        }
+                    }
+                };
+
                 btnContainer.appendChild(copyBtn);
                 btnContainer.appendChild(insertBtn);
                 btnContainer.appendChild(saveBtn);
+                btnContainer.appendChild(replaceBtn);
                 pre.appendChild(btnContainer);
             });
         }
