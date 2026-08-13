@@ -260,10 +260,20 @@
                     <i class="fas fa-folder-open text-yellow-400 mr-2"></i>
                     <span class="text-sm font-medium">Pengurus Fail</span>
                 </div>
-                <button onclick="createNewFile()" class="text-xs bg-vsblue hover:bg-blue-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1">
-                    <i class="fas fa-plus"></i>
-                    <span class="hidden sm:inline">Fail Baharu</span>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="syncFilesToCloud()" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Simpan fail ke cloud">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span class="hidden sm:inline">Sync</span>
+                    </button>
+                    <button onclick="loadFilesFromCloud()" class="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Muat fail dari cloud">
+                        <i class="fas fa-cloud-download-alt"></i>
+                        <span class="hidden sm:inline">Muat</span>
+                    </button>
+                    <button onclick="createNewFile()" class="text-xs bg-vsblue hover:bg-blue-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1">
+                        <i class="fas fa-plus"></i>
+                        <span class="hidden sm:inline">Fail Baharu</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Upload Actions -->
@@ -725,7 +735,23 @@
         let workspaceFiles = {};
         let currentFileName = 'main.js';
 
-        function loadWorkspaceFiles() {
+        async function loadWorkspaceFiles() {
+            // Try cloud first if user is logged in
+            if (currentUser) {
+                const cloudLoaded = await loadFilesFromCloud();
+                if (cloudLoaded) {
+                    // Restore last opened file after cloud load
+                    const lastFile = localStorage.getItem('droidlink-current-file');
+                    if (lastFile && workspaceFiles.hasOwnProperty(lastFile)) {
+                        currentFileName = lastFile;
+                    } else {
+                        currentFileName = Object.keys(workspaceFiles)[0];
+                    }
+                    return;
+                }
+            }
+            
+            // Fallback to local
             const saved = localStorage.getItem('droidlink-files');
             if (saved) {
                 try {
@@ -757,9 +783,58 @@
         function saveWorkspaceFiles() {
             try {
                 localStorage.setItem('droidlink-files', JSON.stringify(workspaceFiles));
+                // Sync to cloud
+                syncFilesToCloud();
             } catch (e) {
                 showNotification('Ralat: Storan penuh. Fail terlalu besar.');
             }
+        }
+
+        // ============================================
+        // CLOUD SYNC FOR FILES
+        // ============================================
+        async function syncFilesToCloud() {
+            if (!firestoreDb || !currentUser) return;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                await userRef.set({
+                    workspaceFiles: workspaceFiles,
+                    lastFileSync: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log('Files synced to cloud:', Object.keys(workspaceFiles).length, 'files');
+            } catch (error) {
+                console.warn('Failed to sync files to cloud:', error);
+            }
+        }
+
+        async function loadFilesFromCloud() {
+            if (!firestoreDb || !currentUser) return false;
+            
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const doc = await userRef.get({ source: 'server' });
+                
+                if (doc.exists && doc.data().workspaceFiles) {
+                    const cloudFiles = doc.data().workspaceFiles;
+                    if (typeof cloudFiles === 'object' && Object.keys(cloudFiles).length > 0) {
+                        workspaceFiles = cloudFiles;
+                        localStorage.setItem('droidlink-files', JSON.stringify(workspaceFiles));
+                        renderFileList();
+                        
+                        // Update current file if it exists in cloud
+                        if (currentFileName && workspaceFiles[currentFileName] && monacoEditor) {
+                            monacoEditor.setValue(workspaceFiles[currentFileName]);
+                        }
+                        
+                        console.log('Files loaded from cloud:', Object.keys(workspaceFiles).length, 'files');
+                        return true;
+                    }
+                }
+            } catch (error) {
+                console.warn('Failed to load files from cloud:', error);
+            }
+            return false;
         }
 
         function getLangFromFilename(filename) {
@@ -1536,6 +1611,26 @@ helloWorld();
                             
                             scrollToBottom();
                             console.log('Real-time sync: chat updated');
+                            updateSyncStatus();
+                        }
+                    }
+
+                    // Sync workspace files
+                    if (data.workspaceFiles && typeof data.workspaceFiles === 'object') {
+                        const cloudFilesStr = JSON.stringify(data.workspaceFiles);
+                        const localFilesStr = JSON.stringify(workspaceFiles);
+                        
+                        if (cloudFilesStr !== localFilesStr) {
+                            workspaceFiles = data.workspaceFiles;
+                            localStorage.setItem('droidlink-files', cloudFilesStr);
+                            renderFileList();
+                            
+                            // Update current file content if open
+                            if (currentFileName && workspaceFiles[currentFileName] && monacoEditor) {
+                                monacoEditor.setValue(workspaceFiles[currentFileName]);
+                            }
+                            
+                            console.log('Real-time sync: files updated');
                             updateSyncStatus();
                         }
                     }
