@@ -226,6 +226,10 @@
                     <span class="text-sm font-medium" id="file-name">main.js</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="showPasteModal()" class="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Tampal kod sebagai fail baharu">
+                        <i class="fas fa-paste"></i>
+                        <span class="hidden sm:inline">Tampal</span>
+                    </button>
                     <button onclick="downloadCurrentFile()" class="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Muat turun fail ke peranti">
                         <i class="fas fa-download"></i>
                         <span class="hidden sm:inline">Muat Turun</span>
@@ -472,6 +476,69 @@
             </button>
         </div>
         <iframe id="preview-frame" class="flex-1 w-full bg-white"></iframe>
+    </div>
+
+    <!-- Paste Code Modal -->
+    <div id="paste-modal" class="fixed inset-0 bg-black bg-opacity-80 z-[100] hidden flex-col p-4">
+        <div class="bg-vsnav border border-vsborder rounded-lg max-w-2xl w-full mx-auto my-auto max-h-[90vh] flex flex-col">
+            <div class="h-12 border-b border-vsborder flex items-center justify-between px-4 shrink-0">
+                <div class="flex items-center">
+                    <i class="fas fa-paste text-purple-400 mr-2"></i>
+                    <span class="text-sm font-medium text-white">Tampal Kod sebagai Fail</span>
+                </div>
+                <button onclick="closePasteModal()" class="text-gray-400 hover:text-white p-2">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="p-4 space-y-4 overflow-y-auto flex-1">
+                <!-- Code textarea -->
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-300">Kod HTML / JS / CSS / dll.</label>
+                    <textarea id="paste-code" rows="8" placeholder="Tampal kod anda di sini..." class="w-full bg-[#1e1e1e] border border-vsborder rounded p-3 text-white text-sm font-mono focus:border-vsblue focus:outline-none resize-none"></textarea>
+                </div>
+
+                <!-- Auto-detect notice -->
+                <div id="paste-detect-notice" class="hidden text-xs bg-blue-900/30 border border-blue-700 text-blue-300 rounded p-2">
+                    <i class="fas fa-magic mr-1"></i><span id="paste-detect-text"></span>
+                </div>
+
+                <!-- Filename input -->
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-300">Nama Fail</label>
+                    <input type="text" id="paste-filename" placeholder="cth: index.html, script.js, style.css" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                </div>
+
+                <!-- Folder selection -->
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-300">Folder (pilihan)</label>
+                    <div class="flex gap-2">
+                        <select id="paste-folder-select" class="flex-1 bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <option value="">(Root - tiada folder)</option>
+                        </select>
+                        <input type="text" id="paste-folder-new" placeholder="Atau folder baharu..." class="flex-1 bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Contoh: <code class="bg-gray-700 px-1 rounded">components/</code> atau <code class="bg-gray-700 px-1 rounded">assets/js/</code></p>
+                </div>
+
+                <!-- Preview path -->
+                <div class="bg-[#1e1e1e] border border-vsborder rounded p-3">
+                    <p class="text-xs text-gray-500 mb-1">Laluan penuh:</p>
+                    <p class="text-sm text-green-400 font-mono" id="paste-preview-path">fail.js</p>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-vsborder shrink-0">
+                <div class="flex gap-2">
+                    <button onclick="closePasteModal()" class="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors">
+                        Batal
+                    </button>
+                    <button onclick="savePastedCode()" class="flex-1 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium transition-colors">
+                        <i class="fas fa-save mr-1"></i>Simpan Fail
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Scripts -->
@@ -802,7 +869,162 @@
             event.target.value = ''; // Reset input
         }
 
-        // Default Code
+        // ============================================
+        // PASTE CODE AS FILE
+        // ============================================
+        function showPasteModal() {
+            const modal = document.getElementById('paste-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // Reset form
+            document.getElementById('paste-code').value = '';
+            document.getElementById('paste-filename').value = '';
+            document.getElementById('paste-folder-new').value = '';
+            document.getElementById('paste-detect-notice').classList.add('hidden');
+            updatePastePreviewPath();
+            loadFolderOptions();
+            
+            // Focus on code textarea
+            setTimeout(() => document.getElementById('paste-code').focus(), 100);
+        }
+
+        function closePasteModal() {
+            const modal = document.getElementById('paste-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function loadFolderOptions() {
+            const select = document.getElementById('paste-folder-select');
+            const folders = new Set();
+            
+            // Extract existing folders from workspace
+            Object.keys(workspaceFiles).forEach(path => {
+                const parts = path.split('/');
+                if (parts.length > 1) {
+                    // Add all parent folders
+                    for (let i = 1; i < parts.length; i++) {
+                        folders.add(parts.slice(0, i).join('/') + '/');
+                    }
+                }
+            });
+            
+            // Rebuild options
+            select.innerHTML = '<option value="">(Root - tiada folder)</option>';
+            Array.from(folders).sort().forEach(folder => {
+                const opt = document.createElement('option');
+                opt.value = folder;
+                opt.textContent = folder;
+                select.appendChild(opt);
+            });
+        }
+
+        function detectCodeLanguage(code) {
+            const trimmed = code.trim().toLowerCase();
+            if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) return { ext: 'html', name: 'HTML' };
+            if (trimmed.includes('<script') || trimmed.includes('function ') || trimmed.includes('=>') || trimmed.includes('console.log')) return { ext: 'js', name: 'JavaScript' };
+            if (trimmed.includes('def ') && trimmed.includes(':')) return { ext: 'py', name: 'Python' };
+            if (trimmed.startsWith('{') && trimmed.includes('\":')) return { ext: 'json', name: 'JSON' };
+            if (trimmed.includes('{') && trimmed.includes('}') && trimmed.includes(':') && !trimmed.includes('function')) return { ext: 'css', name: 'CSS' };
+            if (trimmed.startsWith('# ')) return { ext: 'md', name: 'Markdown' };
+            return null;
+        }
+
+        function updatePastePreviewPath() {
+            const filename = document.getElementById('paste-filename').value.trim();
+            const folderSelect = document.getElementById('paste-folder-select').value;
+            const folderNew = document.getElementById('paste-folder-new').value.trim();
+            
+            let folder = '';
+            if (folderNew) {
+                folder = folderNew.endsWith('/') ? folderNew : folderNew + '/';
+            } else if (folderSelect) {
+                folder = folderSelect;
+            }
+            
+            const path = folder + (filename || 'fail.js');
+            document.getElementById('paste-preview-path').textContent = path;
+        }
+
+        function savePastedCode() {
+            const code = document.getElementById('paste-code').value;
+            let filename = document.getElementById('paste-filename').value.trim();
+            const folderSelect = document.getElementById('paste-folder-select').value;
+            const folderNew = document.getElementById('paste-folder-new').value.trim();
+            
+            if (!code.trim()) {
+                showNotification('Sila tampal kod terlebih dahulu!');
+                return;
+            }
+            
+            if (!filename) {
+                // Auto-generate filename based on detected language
+                const detected = detectCodeLanguage(code);
+                if (detected) {
+                    filename = 'untitled.' + detected.ext;
+                } else {
+                    filename = 'untitled.txt';
+                }
+            }
+            
+            // Build full path
+            let folder = '';
+            if (folderNew) {
+                folder = folderNew.endsWith('/') ? folderNew : folderNew + '/';
+            } else if (folderSelect) {
+                folder = folderSelect;
+            }
+            
+            const fullPath = folder + filename;
+            
+            // Check if file exists
+            if (workspaceFiles.hasOwnProperty(fullPath)) {
+                if (!confirm('Fail "' + fullPath + '" sudah wujud. Gantikan?')) {
+                    return;
+                }
+            }
+            
+            // Save to workspace
+            workspaceFiles[fullPath] = code;
+            saveWorkspaceFiles();
+            renderFileList();
+            
+            // Open the new file
+            openFile(fullPath);
+            closePasteModal();
+            showNotification('Fail "' + fullPath + '" berjaya disimpan!');
+        }
+
+        // Event listeners for paste modal
+        document.getElementById('paste-code').addEventListener('input', function() {
+            const code = this.value;
+            const detected = detectCodeLanguage(code);
+            const notice = document.getElementById('paste-detect-notice');
+            const noticeText = document.getElementById('paste-detect-text');
+            const filenameInput = document.getElementById('paste-filename');
+            
+            if (detected && !filenameInput.value) {
+                notice.classList.remove('hidden');
+                noticeText.textContent = 'Dikesan sebagai ' + detected.name + ' (.' + detected.ext + ')';
+            } else if (!detected) {
+                notice.classList.add('hidden');
+            }
+        });
+
+        document.getElementById('paste-filename').addEventListener('input', updatePastePreviewPath);
+        document.getElementById('paste-folder-select').addEventListener('change', function() {
+            if (this.value) {
+                document.getElementById('paste-folder-new').value = '';
+            }
+            updatePastePreviewPath();
+        });
+        document.getElementById('paste-folder-new').addEventListener('input', function() {
+            if (this.value) {
+                document.getElementById('paste-folder-select').value = '';
+            }
+            updatePastePreviewPath();
+        });
         const initialCode = `// Selamat datang ke DroidLink
 // 1. Pergi ke tab 'Fail' untuk muat naik fail/folder dari peranti anda.
 // 2. Pergi ke tab 'Tetapan' untuk set API AI.
