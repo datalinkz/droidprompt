@@ -488,6 +488,20 @@
                 </div>
 
                 <div class="pt-4 border-t border-vsborder">
+                    <h3 class="text-lg font-semibold text-white mb-2">Status Cloud Sync</h3>
+                    <div id="sync-status" class="bg-[#1e1e1e] border border-vsborder rounded p-3 text-xs space-y-1">
+                        <p><span class="text-gray-500">Firestore:</span> <span id="status-firestore" class="text-yellow-400">Menyemak...</span></p>
+                        <p><span class="text-gray-500">Listener:</span> <span id="status-listener" class="text-yellow-400">Tidak aktif</span></p>
+                        <p><span class="text-gray-500">Sejarah Prompt:</span> <span id="status-history-count" class="text-gray-400">0 item</span></p>
+                        <p><span class="text-gray-500">Perbualan Chat:</span> <span id="status-chat-count" class="text-gray-400">0 mesej</span></p>
+                        <p><span class="text-gray-500">Sync Terakhir:</span> <span id="status-last-sync" class="text-gray-400">-</span></p>
+                    </div>
+                    <button onclick="testFirestoreConnection()" class="w-full mt-2 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors">
+                        <i class="fas fa-plug mr-1"></i>Uji Sambungan Firestore
+                    </button>
+                </div>
+
+                <div class="pt-4 border-t border-vsborder">
                     <h3 class="text-lg font-semibold text-white mb-2">Akaun</h3>
                     <p class="text-xs text-gray-400 mb-3" id="current-user-email">Tiada pengguna log masuk</p>
                     <button onclick="signOut()" class="w-full py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium transition-colors">
@@ -1491,6 +1505,7 @@ helloWorld();
             realtimeUnsubscribe = userRef.onSnapshot((doc) => {
                 if (doc.exists) {
                     const data = doc.data();
+                    console.log('Real-time sync triggered:', data.lastSync);
                     
                     // Sync prompt history
                     if (data.promptHistory && Array.isArray(data.promptHistory)) {
@@ -1499,6 +1514,7 @@ helloWorld();
                             localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
                             renderHistoryList();
                             console.log('Real-time sync: history updated');
+                            updateSyncStatus();
                         }
                     }
                     
@@ -1520,11 +1536,13 @@ helloWorld();
                             
                             scrollToBottom();
                             console.log('Real-time sync: chat updated');
+                            updateSyncStatus();
                         }
                     }
                 }
             }, (error) => {
                 console.warn('Real-time sync error:', error);
+                updateSyncStatus();
             });
         }
 
@@ -2098,6 +2116,53 @@ helloWorld();
                 }
             }
         }
+
+        async function testFirestoreConnection() {
+            const statusEl = document.getElementById('status-firestore');
+            statusEl.innerHTML = '<span class="text-yellow-400"><i class="fas fa-spinner fa-spin"></i> Menyemak...</span>';
+            
+            if (!firestoreDb) {
+                statusEl.innerHTML = '<span class="text-red-400">Firestore tidak dimulakan</span>';
+                return;
+            }
+            
+            if (!currentUser) {
+                statusEl.innerHTML = '<span class="text-red-400">Tiada pengguna log masuk</span>';
+                return;
+            }
+            
+            try {
+                // Try to read user document
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                const doc = await userRef.get({ source: 'server' });
+                
+                if (doc.exists) {
+                    statusEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle"></i> Berjaya (data wujud)</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle"></i> Berjaya (tiada data lagi)</span>';
+                }
+                
+                updateSyncStatus();
+            } catch (error) {
+                console.error('Firestore test error:', error);
+                statusEl.innerHTML = '<span class="text-red-400">Ralat: ' + error.message + '</span>';
+            }
+        }
+
+        function updateSyncStatus() {
+            document.getElementById('status-history-count').textContent = promptHistory.length + ' item';
+            document.getElementById('status-chat-count').textContent = chatHistory.length + ' mesej';
+            document.getElementById('status-listener').textContent = realtimeUnsubscribe ? 'Aktif' : 'Tidak aktif';
+            document.getElementById('status-listener').className = realtimeUnsubscribe ? 'text-green-400' : 'text-red-400';
+            
+            if (firestoreDb) {
+                document.getElementById('status-firestore').textContent = 'Sedia';
+                document.getElementById('status-firestore').className = 'text-green-400';
+            }
+        }
+
+        // Update status every 5 seconds
+        setInterval(updateSyncStatus, 5000);
 
         function showNotification(msg) {
             const toast = document.createElement('div');
