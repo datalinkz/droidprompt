@@ -1757,7 +1757,7 @@ helloWorld();
                             if (cloudSettings.url) localStorage.setItem('omnicode-url', cloudSettings.url);
                             if (cloudSettings.model) localStorage.setItem('omnicode-model', cloudSettings.model);
                             if (cloudSettings.prompt) localStorage.setItem('omnicode-prompt', cloudSettings.prompt);
-                            if (cloudSettings.useProxy !== undefined) localStorage.setItem('omnicode-use-proxy', cloudSettings.useProxy);
+                            // useProxy dikecualikan dari sync - peranti-spesifik
                             if (cloudSettings.timeout) localStorage.setItem('omnicode-timeout', cloudSettings.timeout);
                             if (cloudSettings.useStream !== undefined) localStorage.setItem('omnicode-stream', cloudSettings.useStream);
                             
@@ -2830,7 +2830,10 @@ helloWorld();
                     if (settings.url) localStorage.setItem('omnicode-url', settings.url);
                     if (settings.model) localStorage.setItem('omnicode-model', settings.model);
                     if (settings.prompt) localStorage.setItem('omnicode-prompt', settings.prompt);
-                    if (settings.useProxy !== undefined) localStorage.setItem('omnicode-use-proxy', settings.useProxy);
+                    // useProxy TIDAK dimuat semula dari cloud - tetapan proxy adalah
+                    // peranti-spesifik (bergantung kepada CORS provider & rangkaian
+                    // peranti ini) dan versi lama cloud menyimpan nilai true yang
+                    // rosak sambungan cors.sh. Kekal nilai tempatan.
                     if (settings.timeout) localStorage.setItem('omnicode-timeout', settings.timeout);
                     if (settings.useStream !== undefined) localStorage.setItem('omnicode-stream', settings.useStream);
                     
@@ -2876,10 +2879,25 @@ helloWorld();
             resultEl.classList.remove('hidden');
             resultEl.innerHTML = '<span class="text-yellow-400"><i class="fas fa-spinner fa-spin mr-1"></i>Menguji sambungan...</span>';
             
-            const provider = getActiveProvider();
-            let url = provider.url;
-            const key = provider.key;
-            const model = provider.model;
+            // Jika custom provider aktif, guna nilai yang sedang ditaip dalam
+            // medan profil (bukan simpanan) supaya pengguna boleh uji sebelum simpan
+            let url, key, model, label;
+            if (isCustomProviderActive()) {
+                const typedUrl = document.getElementById('custom-provider-url').value.trim();
+                if (typedUrl) {
+                    url = typedUrl;
+                    key = document.getElementById('custom-provider-key').value.trim();
+                    model = document.getElementById('custom-provider-model').value.trim();
+                    label = document.getElementById('custom-provider-name').value.trim() || 'custom';
+                }
+            }
+            if (!url) {
+                const provider = getActiveProvider();
+                url = provider.url;
+                key = provider.key;
+                model = provider.model;
+                label = provider.name;
+            }
             
             // Auto-append /chat/completions if not present
             if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
@@ -2921,11 +2939,14 @@ helloWorld();
                 clearTimeout(timeoutId);
                 
                 if (response.ok) {
-                    const label = provider.name !== 'default' ? ' (profil: ' + provider.name + ')' : '';
-                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya' + label + '!</span>';
+                    const okLabel = label && label !== 'default' ? ' (profil: ' + label + ')' : '';
+                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya' + okLabel + '!</span>';
                 } else {
                     const errorText = await response.text().catch(() => '');
-                    resultEl.innerHTML = '<span class="text-red-400"><i class="fas fa-times-circle mr-1"></i>Ralat ' + response.status + ': ' + (errorText || response.statusText).substring(0, 100) + '</span>';
+                    let hint = '';
+                    if (response.status === 401 || response.status === 403) hint = ' — semak API key';
+                    if (response.status === 404) hint = ' — semak URL (perlu berakhir /chat/completions)';
+                    resultEl.innerHTML = '<span class="text-red-400"><i class="fas fa-times-circle mr-1"></i>Ralat ' + response.status + hint + ': ' + (errorText || response.statusText).substring(0, 120) + '</span>';
                 }
             } catch (error) {
                 console.error('Connection test error:', error);
@@ -3300,7 +3321,10 @@ helloWorld();
                     errorMsg += '1. URL endpoint tidak lengkap (perlu /chat/completions)\n';
                     errorMsg += '2. CORS disekat oleh pelayan\n';
                     errorMsg += '3. Sambungan internet terputus\n';
-                    errorMsg += '4. Browser menyekat permintaan (mixed content HTTPS/HTTP)';
+                    errorMsg += '4. Browser menyekat permintaan (mixed content HTTPS/HTTP)\n\n';
+                    errorMsg += 'URL dicuba: ' + finalUrl + '\n';
+                    errorMsg += 'Provider: ' + (provider.name || 'default') + ' | Model: ' + model + '\n\n';
+                    errorMsg += 'Jika URL bermula dengan proxy.cors.sh, matikan "Guna CORS Proxy" di Tetapan.';
                 } else {
                     errorMsg += error.message;
                 }
@@ -3880,6 +3904,16 @@ helloWorld();
         window.onload = () => {
             loadSettings();
             loadTokenUsage();
+
+            // Migrasi sehingga sekali: cloud lama mungkin masih mengandungi
+            // useProxy=true (era cors.sh percuma) yang merosakkan sambungan.
+            // Padam nilai tersimpan supaya lalai (terus, tanpa proxy) digunakan.
+            if (localStorage.getItem('omnicode-use-proxy-migrated') !== 'v2') {
+                localStorage.removeItem('omnicode-use-proxy');
+                localStorage.setItem('omnicode-use-proxy-migrated', 'v2');
+                document.getElementById('setting-use-proxy').checked = false;
+                console.log('Proxy flag migrated: direct connection now default');
+            }
             
             // Initialize Firebase Auth
             initFirebase();

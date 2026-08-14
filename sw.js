@@ -1,5 +1,5 @@
 // DroidLink Service Worker
-const CACHE_NAME = 'droidlink-v1';
+const CACHE_NAME = 'droidlink-v2';
 const ASSETS = [
   './',
   './index.html',
