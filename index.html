@@ -265,6 +265,10 @@
                     <span class="text-sm font-medium">Pengurus Fail</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="pushToGit()" id="btn-git-push" class="text-xs bg-orange-700 hover:bg-orange-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Push semua fail ke GitHub">
+                        <i class="fas fa-code-branch"></i>
+                        <span class="hidden sm:inline">Git Push</span>
+                    </button>
                     <button onclick="syncFilesToCloud()" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Simpan fail ke cloud">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <span class="hidden sm:inline">Sync</span>
@@ -308,6 +312,10 @@
                     <span class="text-sm font-medium">Pembantu AI</span>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="toggleTokenPanel()" id="btn-token-usage" class="text-xs bg-yellow-700 hover:bg-yellow-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Penggunaan token chat semasa">
+                        <i class="fas fa-coins"></i>
+                        <span class="hidden sm:inline" id="token-badge-total">0 tok</span>
+                    </button>
                     <button onclick="manualSyncToCloud()" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1" title="Simpan perbualan ke cloud sekarang">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <span class="hidden sm:inline">Sync</span>
@@ -365,6 +373,17 @@
                             <p class="text-sm">Helo! Saya sedia membantu anda mengekod. Pastikan anda telah mengkonfigurasi <b>Tetapan AI</b> terlebih dahulu.</p>
                         </div>
                     </div>
+                </div>
+
+                <!-- Token Usage Panel -->
+                <div id="token-usage-panel" class="hidden absolute bottom-16 left-2 right-2 md:left-auto md:right-2 md:w-56 bg-vsnav border border-vsborder rounded-lg p-2 text-[10px] shadow-lg z-40 space-y-0.5">
+                    <div class="flex items-center justify-between mb-1 border-b border-vsborder pb-1">
+                        <span class="text-gray-400 font-medium"><i class="fas fa-coins text-yellow-400 mr-1"></i>Token Chat Semasa</span>
+                        <button onclick="document.getElementById('token-usage-panel').classList.add('hidden')" class="text-gray-500 hover:text-white"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="flex justify-between"><span class="text-gray-500">Input</span><span id="token-quick-prompt" class="text-white">0</span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">Output</span><span id="token-quick-completion" class="text-white">0</span></div>
+                    <div class="flex justify-between"><span class="text-yellow-500 font-medium">Jumlah</span><span id="token-quick-total" class="text-yellow-400 font-medium">0</span></div>
                 </div>
 
                 <!-- History Panel -->
@@ -482,6 +501,30 @@
                         <textarea id="setting-prompt" rows="3" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">Anda adalah pembantu pengaturcaraan pakar (expert coding assistant). Jawab dengan padat dan berikan kod yang lengkap.</textarea>
                     </div>
 
+                    <div class="bg-purple-900/20 border border-purple-700/50 rounded-lg p-3">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="checkbox" id="setting-custom-provider" class="mr-2 rounded" onchange="toggleCustomProviderUI()">
+                            <div>
+                                <span class="text-sm font-medium text-purple-300">Guna Custom Agent Provider</span>
+                                <p class="text-xs text-gray-400">Aktifkan profil provider tersendiri yang disimpan di bawah. Apabila aktif, tetapan di atas (URL, Key, Model, System Prompt) diabaikan.</p>
+                            </div>
+                        </label>
+                        <div id="custom-provider-fields" class="hidden mt-3 space-y-2">
+                            <div class="flex gap-2 items-center">
+                                <select id="custom-provider-profile" onchange="loadCustomProviderProfile()" class="flex-1 bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                                    <option value="">-- Pilih Profil --</option>
+                                </select>
+                                <button type="button" onclick="saveCustomProviderProfile()" class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-2 rounded transition-colors" title="Simpan profil baharu / kemas kini"><i class="fas fa-save mr-1"></i>Simpan</button>
+                                <button type="button" onclick="deleteCustomProviderProfile()" class="text-xs bg-red-700 hover:bg-red-600 text-white px-3 py-2 rounded transition-colors" title="Padam profil"><i class="fas fa-trash"></i></button>
+                            </div>
+                            <input type="text" id="custom-provider-name" placeholder="Nama profil (cth: Groq Pantas)" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <input type="text" id="custom-provider-url" placeholder="URL lengkap (cth: https://api.groq.com/openai/v1/chat/completions)" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <input type="password" id="custom-provider-key" placeholder="API Key" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <input type="text" id="custom-provider-model" placeholder="Nama model (cth: llama-3.1-8b-instant)" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <input type="text" id="custom-provider-prompt" placeholder="System prompt khusus (pilihan)" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        </div>
+                    </div>
+
                     <div>
                         <label class="block text-sm font-medium mb-1">Timeout (saat)</label>
                         <select id="setting-timeout" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
@@ -521,6 +564,37 @@
                             Simpan Konfigurasi Firebase
                         </button>
                     </div>
+                </div>
+
+                <div class="pt-4 border-t border-vsborder">
+                    <h3 class="text-lg font-semibold text-white mb-2"><i class="fas fa-code-branch text-green-400 mr-1"></i>Git Push</h3>
+                    <p class="text-xs text-gray-400 mb-4">Simpan semua fail workspace ke repositori GitHub anda melalui GitHub REST API.</p>
+                    
+                    <div class="space-y-3">
+                        <input type="text" id="git-username" placeholder="Username GitHub" autocomplete="off" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <input type="text" id="git-repo" placeholder="Nama repo (cth: droidprompt)" autocomplete="off" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <input type="text" id="git-branch" placeholder="Branch (cth: main)" autocomplete="off" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <input type="password" id="git-token" placeholder="Personal Access Token (PAT - classic dengan scope 'repo')" autocomplete="off" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                        <p class="text-[10px] text-gray-500"><i class="fas fa-info-circle mr-1"></i>Token disimpan hanya dalam localStorage peranti ini dan tidak disegerakkan ke cloud. Cipta PAT di github.com/settings/tokens</p>
+                        <button onclick="saveGitConfig()" class="w-full py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium transition-colors">
+                            <i class="fas fa-save mr-1"></i>Simpan Konfigurasi Git
+                        </button>
+                        <div id="git-status" class="text-xs space-y-1 hidden bg-[#1e1e1e] border border-vsborder rounded p-2"></div>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-vsborder">
+                    <h3 class="text-lg font-semibold text-white mb-2"><i class="fas fa-coins text-yellow-400 mr-1"></i>Penggunaan Token (Chat Semasa)</h3>
+                    <div class="bg-[#1e1e1e] border border-vsborder rounded p-3 text-xs space-y-1">
+                        <div class="flex justify-between"><span class="text-gray-500">Prompt (Input)</span><span id="token-prompt" class="text-white">0</span></div>
+                        <div class="flex justify-between"><span class="text-gray-500">Completion (Output)</span><span id="token-completion" class="text-white">0</span></div>
+                        <div class="flex justify-between border-t border-vsborder pt-1 mt-1"><span class="text-gray-400 font-medium">Jumlah Sesi</span><span id="token-total" class="text-yellow-400 font-medium">0</span></div>
+                        <div class="flex justify-between"><span class="text-gray-500">Model</span><span id="token-model" class="text-white">-</span></div>
+                        <div class="flex justify-between"><span class="text-gray-500">Permintaan</span><span id="token-requests" class="text-white">0</span></div>
+                    </div>
+                    <button onclick="resetTokenUsage()" class="w-full mt-2 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition-colors">
+                        <i class="fas fa-rotate-left mr-1"></i>Set Semula Kiraan
+                    </button>
                 </div>
 
                 <div class="pt-4 border-t border-vsborder">
@@ -2247,6 +2321,323 @@ helloWorld();
         }
 
         // ============================================
+        // CUSTOM AGENT PROVIDER PROFILES
+        // ============================================
+        function getCustomProviders() {
+            try {
+                return JSON.parse(localStorage.getItem(getUserKey('droidlink-custom-providers')) || '{}');
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveCustomProviders(providers) {
+            localStorage.setItem(getUserKey('droidlink-custom-providers'), JSON.stringify(providers));
+        }
+
+        function isCustomProviderActive() {
+            return localStorage.getItem(getUserKey('droidlink-use-custom-provider')) === 'true';
+        }
+
+        function toggleCustomProviderUI() {
+            const enabled = document.getElementById('setting-custom-provider').checked;
+            document.getElementById('custom-provider-fields').classList.toggle('hidden', !enabled);
+            localStorage.setItem(getUserKey('droidlink-use-custom-provider'), enabled);
+            if (enabled) {
+                refreshCustomProviderProfiles();
+                showNotification('Custom provider diaktifkan - profil akan digunakan untuk permintaan AI.');
+            } else {
+                showNotification('Custom provider dimatikan - tetapan biasa digunakan.');
+            }
+        }
+
+        function refreshCustomProviderProfiles() {
+            const select = document.getElementById('custom-provider-profile');
+            const providers = getCustomProviders();
+            const names = Object.keys(providers);
+            select.innerHTML = '<option value="">-- Pilih Profil --</option>' + names.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('');
+        }
+
+        function saveCustomProviderProfile() {
+            const name = document.getElementById('custom-provider-name').value.trim();
+            const url = document.getElementById('custom-provider-url').value.trim();
+            const key = document.getElementById('custom-provider-key').value.trim();
+            const model = document.getElementById('custom-provider-model').value.trim();
+            const prompt = document.getElementById('custom-provider-prompt').value.trim();
+
+            if (!name || !url || !key || !model) {
+                showNotification('Sila isi nama, URL, API key dan model untuk profil.');
+                return;
+            }
+
+            const providers = getCustomProviders();
+            const isNew = !providers[name];
+            providers[name] = { url, key, model, prompt };
+            saveCustomProviders(providers);
+            refreshCustomProviderProfiles();
+            document.getElementById('custom-provider-profile').value = name;
+            showNotification(isNew ? 'Profil "' + name + '" disimpan!' : 'Profil "' + name + '" dikemas kini!');
+        }
+
+        function loadCustomProviderProfile() {
+            const name = document.getElementById('custom-provider-profile').value;
+            if (!name) return;
+            const profile = getCustomProviders()[name];
+            if (!profile) return;
+            document.getElementById('custom-provider-name').value = name;
+            document.getElementById('custom-provider-url').value = profile.url || '';
+            document.getElementById('custom-provider-key').value = profile.key || '';
+            document.getElementById('custom-provider-model').value = profile.model || '';
+            document.getElementById('custom-provider-prompt').value = profile.prompt || '';
+        }
+
+        function deleteCustomProviderProfile() {
+            const name = document.getElementById('custom-provider-profile').value || document.getElementById('custom-provider-name').value.trim();
+            if (!name) {
+                showNotification('Pilih profil dahulu untuk dipadam.');
+                return;
+            }
+            if (!confirm('Padam profil "' + name + '"?')) return;
+            const providers = getCustomProviders();
+            delete providers[name];
+            saveCustomProviders(providers);
+            refreshCustomProviderProfiles();
+            document.getElementById('custom-provider-name').value = '';
+            document.getElementById('custom-provider-url').value = '';
+            document.getElementById('custom-provider-key').value = '';
+            document.getElementById('custom-provider-model').value = '';
+            document.getElementById('custom-provider-prompt').value = '';
+            showNotification('Profil "' + name + '" dipadam.');
+        }
+
+        function getActiveProvider() {
+            if (isCustomProviderActive()) {
+                const name = document.getElementById('custom-provider-profile')?.value;
+                const profile = name ? getCustomProviders()[name] : null;
+                if (profile) {
+                    return {
+                        url: profile.url,
+                        key: profile.key,
+                        model: profile.model,
+                        sysPrompt: profile.prompt || localStorage.getItem('omnicode-prompt') || ''
+                    };
+                }
+            }
+            return {
+                url: localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions',
+                key: localStorage.getItem('omnicode-key') || '',
+                model: localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo',
+                sysPrompt: localStorage.getItem('omnicode-prompt') || ''
+            };
+        }
+
+        // ============================================
+        // GIT PUSH (GitHub REST API)
+        // ============================================
+        function loadGitConfig() {
+            document.getElementById('git-username').value = localStorage.getItem('git-username') || '';
+            document.getElementById('git-repo').value = localStorage.getItem('git-repo') || '';
+            document.getElementById('git-branch').value = localStorage.getItem('git-branch') || 'main';
+            document.getElementById('git-token').value = localStorage.getItem('git-token') || '';
+        }
+
+        function saveGitConfig() {
+            localStorage.setItem('git-username', document.getElementById('git-username').value.trim());
+            localStorage.setItem('git-repo', document.getElementById('git-repo').value.trim());
+            localStorage.setItem('git-branch', document.getElementById('git-branch').value.trim() || 'main');
+            localStorage.setItem('git-token', document.getElementById('git-token').value.trim());
+            updateGitStatusSection();
+            showNotification('Konfigurasi Git disimpan!');
+        }
+
+        function getGitHeaders() {
+            return {
+                'Authorization': 'Bearer ' + localStorage.getItem('git-token'),
+                'Accept': 'application/vnd.github+json',
+                'Content-Type': 'application/json'
+            };
+        }
+
+        async function pushToGit() {
+            const username = localStorage.getItem('git-username');
+            const repo = localStorage.getItem('git-repo');
+            const branch = localStorage.getItem('git-branch') || 'main';
+            const token = localStorage.getItem('git-token');
+
+            if (!username || !repo || !token) {
+                showNotification('Sila lengkapkan konfigurasi Git di tab Tetapan.');
+                switchTab('settings');
+                return;
+            }
+
+            const files = Object.keys(workspaceFiles);
+            if (files.length === 0) {
+                showNotification('Tiada fail untuk dipush.');
+                return;
+            }
+
+            const commitMsg = 'Update from DroidLink ' + new Date().toLocaleString('ms-MY');
+            const btn = document.getElementById('btn-git-push');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            try {
+                const apiBase = `https://api.github.com/repos/${username}/${repo}`;
+
+                // 1. Dapatkan SHA branch semasa (fallback ke default branch jika tiada)
+                let baseSha = null;
+                const refRes = await fetch(`${apiBase}/git/ref/heads/${branch}`, { headers: getGitHeaders() });
+                if (refRes.ok) {
+                    baseSha = (await refRes.json()).object.sha;
+                } else {
+                    const repoRes = await fetch(`${apiBase}`, { headers: getGitHeaders() });
+                    if (!repoRes.ok) throw new Error('Repo tidak dijumpai atau token tidak sah (' + repoRes.status + ')');
+                    const defaultBranch = (await repoRes.json()).default_branch;
+                    const defRes = await fetch(`${apiBase}/git/ref/heads/${defaultBranch}`, { headers: getGitHeaders() });
+                    if (defRes.ok) baseSha = (await defRes.json()).object.sha;
+                }
+
+                // 2. Dapatkan tree branch (untuk kekalkan fail lain yang tiada dalam workspace)
+                let baseTree = null;
+                if (baseSha) {
+                    const commitRes = await fetch(`${apiBase}/git/commits/${baseSha}`, { headers: getGitHeaders() });
+                    if (commitRes.ok) baseTree = (await commitRes.json()).tree.sha;
+                }
+
+                // 3. Cipta blob untuk setiap fail workspace
+                const treeItems = [];
+                for (const fileName of files) {
+                    const blobRes = await fetch(`${apiBase}/git/blobs`, {
+                        method: 'POST',
+                        headers: getGitHeaders(),
+                        body: JSON.stringify({ content: workspaceFiles[fileName], encoding: 'utf-8' })
+                    });
+                    if (!blobRes.ok) throw new Error('Gagal cipta blob untuk ' + fileName);
+                    const blob = await blobRes.json();
+                    treeItems.push({ path: fileName, mode: '100644', type: 'blob', sha: blob.sha });
+                }
+
+                // 4. Cipta tree baharu berdasarkan tree asal
+                const treeRes = await fetch(`${apiBase}/git/trees`, {
+                    method: 'POST',
+                    headers: getGitHeaders(),
+                    body: JSON.stringify(baseTree ? { base_tree: baseTree, tree: treeItems } : { tree: treeItems })
+                });
+                if (!treeRes.ok) throw new Error('Gagal cipta tree');
+                const newTree = (await treeRes.json()).sha;
+
+                // 5. Cipta commit
+                const commitRes = await fetch(`${apiBase}/git/commits`, {
+                    method: 'POST',
+                    headers: getGitHeaders(),
+                    body: JSON.stringify({ message: commitMsg, tree: newTree, parents: baseSha ? [baseSha] : [] })
+                });
+                if (!commitRes.ok) throw new Error('Gagal cipta commit');
+                const newCommit = (await commitRes.json()).sha;
+
+                // 6. Kemaskini ref branch
+                const updateRes = await fetch(`${apiBase}/git/refs/heads/${branch}`, {
+                    method: 'PATCH',
+                    headers: getGitHeaders(),
+                    body: JSON.stringify({ sha: newCommit, force: false })
+                });
+                if (updateRes.status === 422) {
+                    // Branch belum wujud - cipta baharu
+                    const createRes = await fetch(`${apiBase}/git/refs`, {
+                        method: 'POST',
+                        headers: getGitHeaders(),
+                        body: JSON.stringify({ sha: newCommit, ref: 'refs/heads/' + branch })
+                    });
+                    if (!createRes.ok) throw new Error('Gagal cipta branch ' + branch);
+                } else if (!updateRes.ok) {
+                    throw new Error('Gagal kemaskini branch (' + updateRes.status + ')');
+                }
+
+                showNotification('Berjaya push ' + files.length + ' fail ke ' + username + '/' + repo + ':' + branch + '!');
+            } catch (error) {
+                console.error('Git push error:', error);
+                showNotification('Git push gagal: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-code-branch"></i><span class="hidden sm:inline">Git Push</span>';
+            }
+        }
+
+        // ============================================
+        // TOKEN USAGE TRACKING (PER CHAT)
+        // ============================================
+        let tokenUsage = { prompt: 0, completion: 0, total: 0, requests: 0, model: '-' };
+
+        function loadTokenUsage() {
+            try {
+                const saved = localStorage.getItem(getUserKey('droidlink-token-usage'));
+                if (saved) tokenUsage = JSON.parse(saved);
+            } catch (e) { /* reset */ }
+            renderTokenUsage();
+        }
+
+        function saveTokenUsage() {
+            localStorage.setItem(getUserKey('droidlink-token-usage'), JSON.stringify(tokenUsage));
+            renderTokenUsage();
+        }
+
+        function estimateTokens(text) {
+            if (!text) return 0;
+            // Anggaran kasar: ~4 aksara per token untuk teks biasa/kod
+            return Math.ceil(text.length / 4);
+        }
+
+        function trackTokenUsage(data, payload, responseText) {
+            const u = data?.usage;
+            if (u && (u.prompt_tokens || u.completion_tokens)) {
+                tokenUsage.prompt += u.prompt_tokens || 0;
+                tokenUsage.completion += u.completion_tokens || 0;
+                tokenUsage.total += u.total_tokens || ((u.prompt_tokens || 0) + (u.completion_tokens || 0));
+            } else {
+                // Anggaran jika provider tidak pulangkan usage
+                const promptText = (payload.messages || []).map(m => m.content || '').join(' ');
+                tokenUsage.prompt += estimateTokens(promptText);
+                tokenUsage.completion += estimateTokens(responseText);
+                tokenUsage.total += estimateTokens(promptText) + estimateTokens(responseText);
+            }
+            tokenUsage.requests += 1;
+            tokenUsage.model = payload.model || '-';
+            saveTokenUsage();
+        }
+
+        function trackTokenUsageChunk(promptText, chunkText) {
+            tokenUsage.prompt += estimateTokens(promptText);
+            tokenUsage.completion += estimateTokens(chunkText);
+            tokenUsage.total += estimateTokens(promptText) + estimateTokens(chunkText);
+            tokenUsage.requests += 1;
+            saveTokenUsage();
+        }
+
+        function renderTokenUsage() {
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+            set('token-prompt', tokenUsage.prompt.toLocaleString('ms-MY'));
+            set('token-completion', tokenUsage.completion.toLocaleString('ms-MY'));
+            set('token-total', tokenUsage.total.toLocaleString('ms-MY'));
+            set('token-model', tokenUsage.model);
+            set('token-requests', tokenUsage.requests);
+            set('token-quick-prompt', tokenUsage.prompt.toLocaleString('ms-MY'));
+            set('token-quick-completion', tokenUsage.completion.toLocaleString('ms-MY'));
+            set('token-quick-total', tokenUsage.total.toLocaleString('ms-MY'));
+            set('token-badge-total', tokenUsage.total.toLocaleString('ms-MY') + ' tok');
+        }
+
+        function toggleTokenPanel() {
+            document.getElementById('token-usage-panel').classList.toggle('hidden');
+        }
+
+        function resetTokenUsage() {
+            if (!confirm('Set semula kiraan token untuk chat semasa?')) return;
+            tokenUsage = { prompt: 0, completion: 0, total: 0, requests: 0, model: tokenUsage.model };
+            saveTokenUsage();
+            showNotification('Kiraan token diset semula.');
+        }
+
+        // ============================================
         // SETTINGS
         // ============================================
         function loadSettings() {
@@ -2262,6 +2653,35 @@ helloWorld();
             document.getElementById('setting-firebase-apiKey').value = localStorage.getItem('firebase-apiKey') || '';
             document.getElementById('setting-firebase-authDomain').value = localStorage.getItem('firebase-authDomain') || '';
             document.getElementById('setting-firebase-projectId').value = localStorage.getItem('firebase-projectId') || '';
+
+            // Custom provider settings
+            const useCustom = localStorage.getItem(getUserKey('droidlink-use-custom-provider')) === 'true';
+            document.getElementById('setting-custom-provider').checked = useCustom;
+            document.getElementById('custom-provider-fields').classList.toggle('hidden', !useCustom);
+            refreshCustomProviderProfiles();
+
+            // Git settings
+            loadGitConfig();
+            updateGitStatusSection();
+        }
+
+        function updateGitStatusSection() {
+            const el = document.getElementById('git-status');
+            if (!el) return;
+            const username = localStorage.getItem('git-username');
+            const repo = localStorage.getItem('git-repo');
+            const branch = localStorage.getItem('git-branch') || 'main';
+            const hasToken = !!localStorage.getItem('git-token');
+            if (username && repo) {
+                el.classList.remove('hidden');
+                el.innerHTML = `
+                    <p><span class="text-gray-500">Repo:</span> <a href="https://github.com/${escapeHTML(username)}/${escapeHTML(repo)}/tree/${escapeHTML(branch)}" target="_blank" class="text-vsblue hover:underline">${escapeHTML(username)}/${escapeHTML(repo)}</a></p>
+                    <p><span class="text-gray-500">Branch:</span> <span class="text-white">${escapeHTML(branch)}</span></p>
+                    <p><span class="text-gray-500">Token:</span> <span class="${hasToken ? 'text-green-400' : 'text-red-400'}">${hasToken ? 'Disimpan' : 'Tiada'}</span></p>
+                `;
+            } else {
+                el.classList.add('hidden');
+            }
         }
 
         function saveSettings() {
@@ -2650,10 +3070,11 @@ helloWorld();
             const prompt = inputEl.value.trim();
             if (!prompt) return;
 
-            const url = localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions';
-            const key = localStorage.getItem('omnicode-key') || '';
-            const model = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
-            const sysPrompt = localStorage.getItem('omnicode-prompt') || '';
+            const provider = getActiveProvider();
+            const url = provider.url;
+            const key = provider.key;
+            const model = provider.model;
+            const sysPrompt = provider.sysPrompt;
             const currentCode = monacoEditor ? monacoEditor.getValue() : '';
 
             // Auto-fix URL if missing /chat/completions
@@ -2751,7 +3172,7 @@ helloWorld();
 
                 if (useStream) {
                     // Handle streaming response
-                    await handleStreamingResponse(response, responseId);
+                    await handleStreamingResponse(response, responseId, payload.messages.map(m => m.content || '').join(' '));
                 } else {
                     // Handle normal response
                     const data = await response.json();
@@ -2761,6 +3182,7 @@ helloWorld();
                     }
 
                     const aiText = data.choices[0].message.content;
+                    trackTokenUsage(data, payload, aiText);
                     
                     chatHistory.push({ role: "assistant", content: aiText });
                     updateMessage(responseId, aiText);
@@ -3044,6 +3466,8 @@ helloWorld();
                 `;
                 chatHistory = [];
                 localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
+                tokenUsage = { prompt: 0, completion: 0, total: 0, requests: 0, model: tokenUsage.model };
+                saveTokenUsage();
                 syncChatToCloud(); // Clear cloud too
                 showNotification('Chat dikosongkan dan disimpan ke sejarah!');
             }
@@ -3105,7 +3529,7 @@ helloWorld();
         }
 
         // Streaming response handler
-        async function handleStreamingResponse(response, responseId) {
+        async function handleStreamingResponse(response, responseId, promptTextForUsage = '') {
             const msgDiv = document.getElementById(responseId);
             if (!msgDiv) return;
             
@@ -3155,6 +3579,9 @@ helloWorld();
                 // Final update with full markdown parsing
                 contentBox.innerHTML = marked.parse(fullText);
                 addCodeBlockButtons(msgDiv);
+                
+                // Track token usage for this streamed response
+                trackTokenUsageChunk(promptTextForUsage, fullText);
                 
                 // Save to history
                 chatHistory.push({ role: "assistant", content: fullText });
@@ -3361,6 +3788,7 @@ helloWorld();
         // ============================================
         window.onload = () => {
             loadSettings();
+            loadTokenUsage();
             
             // Initialize Firebase Auth
             initFirebase();
