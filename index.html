@@ -685,13 +685,20 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
     <script>
         // ============================================
-        // CONFIGURATION - ALLOWED EMAILS
+        // CONFIGURATION - ALLOWED EMAILS (SHA-256)
         // ============================================
-        const ALLOWED_EMAILS = [
-            atob('emhhcmlmLmlkYm9zQGdhbWlsLmNvbQ=='),
-            atob('emhhcmlmLmlkYm9zQGdtYWlsLmNvbQ=='),
-            atob('bXpoYXJpZi5tb2todGFyQGdtYWlsLmNvbQ==')
+        const ALLOWED_EMAIL_HASHES = [
+            'd68ef509b8fd030a23eb0e8e4ba00c7a205e740175118f6a601cbed02c1b65e3',
+            '1e82f516fb9f4d0947b72c94658fe4a57e31c0500c2dbe9ea157d1378451ed52',
+            'c17de0380071a55ce0fb2b85fcbc52584bae553c981a87a3fb958de35b55cc2e'
         ];
+
+        async function isEmailAllowed(email) {
+            const data = new TextEncoder().encode(email);
+            const digest = await crypto.subtle.digest('SHA-256', data);
+            const hash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+            return ALLOWED_EMAIL_HASHES.includes(hash);
+        }
 
         // State variables
         let currentTab = 'editor';
@@ -1563,10 +1570,10 @@ helloWorld();
             showAuthLogin();
         }
 
-        function handleAuthStateChange(user) {
+        async function handleAuthStateChange(user) {
             if (user) {
                 const email = user.email.toLowerCase();
-                if (ALLOWED_EMAILS.includes(email)) {
+                if (await isEmailAllowed(email)) {
                     currentUser = user;
                     hideAuthGate();
                     updateUserUI();
