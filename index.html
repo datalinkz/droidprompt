@@ -463,11 +463,15 @@
                     </div>
 
                     <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3">
-                        <label class="flex items-center cursor-pointer">
-                            <input type="checkbox" id="setting-use-proxy" class="mr-2 rounded">
+                        <label class="flex items-center gap-3">
+                            <select id="setting-proxy-mode" class="bg-[#3c3c3c] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none shrink-0">
+                                <option value="auto">Auto (Cadangan)</option>
+                                <option value="direct">Terus (Tanpa Proxy)</option>
+                                <option value="proxy">Proxy cors.sh</option>
+                            </select>
                             <div>
-                                <span class="text-sm font-medium text-yellow-300">Guna CORS Proxy (cors.sh)</span>
-                                <p class="text-xs text-gray-400">Lalai TIDAK aktif - kebanyakan provider sokong CORS terus. Aktifkan hanya jika mendapat ralat "Failed to fetch" DAN anda ada API key cors.sh sendiri (percuma tidak lagi disediakan).</p>
+                                <span class="text-sm font-medium text-yellow-300">Mod Sambungan</span>
+                                <p class="text-xs text-gray-400">Auto: cuba sambungan terus dahulu; jika disekat (CORS/rangkaian), ia cuba semula melalui proxy cors.sh secara automatik dan mengingati kaedah yang berjaya untuk host tersebut.</p>
                             </div>
                         </label>
                     </div>
@@ -2403,7 +2407,7 @@ helloWorld();
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 15000);
-                const response = await fetch(url, {
+                const response = await smartFetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2419,7 +2423,8 @@ helloWorld();
                 clearTimeout(timeoutId);
 
                 if (response.ok) {
-                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya!</span>';
+                    const route = getRouteMemory()[new URL(url).host] || 'terus';
+                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya! (laluan: ' + route + ')</span>';
                 } else {
                     const errorText = await response.text().catch(() => '');
                     let hint = '';
@@ -2723,7 +2728,7 @@ helloWorld();
             document.getElementById('setting-key').value = localStorage.getItem('omnicode-key') || '';
             document.getElementById('setting-model').value = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
-            document.getElementById('setting-use-proxy').checked = localStorage.getItem('omnicode-use-proxy') === 'true';
+            document.getElementById('setting-proxy-mode').value = getProxyMode();
             document.getElementById('setting-timeout').value = localStorage.getItem('omnicode-timeout') || '60';
             document.getElementById('setting-stream').checked = localStorage.getItem('omnicode-stream') === 'true';
             
@@ -2767,7 +2772,7 @@ helloWorld();
             const key = document.getElementById('setting-key').value.trim();
             const model = document.getElementById('setting-model').value.trim();
             const prompt = document.getElementById('setting-prompt').value.trim();
-            const useProxy = document.getElementById('setting-use-proxy').checked;
+            const proxyMode = document.getElementById('setting-proxy-mode').value;
             const timeout = document.getElementById('setting-timeout').value;
             const useStream = document.getElementById('setting-stream').checked;
             
@@ -2780,7 +2785,7 @@ helloWorld();
             localStorage.setItem('omnicode-key', key);
             localStorage.setItem('omnicode-model', model);
             localStorage.setItem('omnicode-prompt', prompt);
-            localStorage.setItem('omnicode-use-proxy', useProxy);
+            localStorage.setItem('omnicode-proxy-mode', proxyMode);
             localStorage.setItem('omnicode-timeout', timeout);
             localStorage.setItem('omnicode-stream', useStream);
             
@@ -2803,7 +2808,6 @@ helloWorld();
                         url: localStorage.getItem('omnicode-url') || '',
                         model: localStorage.getItem('omnicode-model') || '',
                         prompt: localStorage.getItem('omnicode-prompt') || '',
-                        useProxy: localStorage.getItem('omnicode-use-proxy') === 'true',
                         timeout: localStorage.getItem('omnicode-timeout') || '60',
                         useStream: localStorage.getItem('omnicode-stream') === 'true'
                     },
@@ -2863,15 +2867,83 @@ helloWorld();
             return false;
         }
 
-        function getProxiedUrl(url) {
-            const useProxy = localStorage.getItem('omnicode-use-proxy') === 'true';
-            if (useProxy) {
-                // Use cors.sh proxy (memerlukan API key cors.sh sendiri)
-                return 'https://proxy.cors.sh/' + url;
+        function getProxyMode() {
+            return localStorage.getItem('omnicode-proxy-mode') || 'auto';
+        }
+
+        // Ingat kaedah yang berjaya per-host: { host: 'direct'|'proxy' }
+        function getRouteMemory() {
+            try {
+                return JSON.parse(localStorage.getItem('droidlink-route-memory') || '{}');
+            } catch (e) {
+                return {};
             }
-            // Lalai: sambungan terus - kebanyakan provider (OpenAI, Groq,
-            // OpenRouter, dll.) menyokong CORS terus dari browser
-            return url;
+        }
+
+        function rememberRoute(url, mode) {
+            try {
+                const mem = getRouteMemory();
+                mem[new URL(url).host] = mode;
+                localStorage.setItem('droidlink-route-memory', JSON.stringify(mem));
+            } catch (e) { /* abaikan */ }
+        }
+
+        function proxiedUrl(url) {
+            return 'https://proxy.cors.sh/' + url;
+        }
+
+        // Fetch dengan mod auto: cuba terus, jika gagal (CORS/rangkaian) cuba
+        // melalui proxy. Mengingati laluan berjaya per-host untuk permintaan
+        // seterusnya. `isNetworkError` membezakan kegagalan sambungan daripada
+        // ralat HTTP sebenar (401 dsb. - yang tidak perlu dicuba semula).
+        function isNetworkError(error) {
+            const msg = (error && error.message) || '';
+            return error instanceof TypeError ||
+                   msg.includes('Failed to fetch') ||
+                   msg.includes('NetworkError') ||
+                   msg.includes('Load failed');
+        }
+
+        async function smartFetch(url, options = {}) {
+            const mode = getProxyMode();
+            const remembered = getRouteMemory()[new URL(url).host];
+
+            if (mode === 'direct') {
+                return fetch(url, options);
+            }
+            if (mode === 'proxy') {
+                return fetch(proxiedUrl(url), options);
+            }
+
+            // AUTO
+            if (remembered === 'direct') {
+                try {
+                    return await fetch(url, options);
+                } catch (error) {
+                    if (!isNetworkError(error)) throw error;
+                    rememberRoute(url, 'proxy');
+                    return fetch(proxiedUrl(url), options);
+                }
+            }
+            if (remembered === 'proxy') {
+                try {
+                    return await fetch(proxiedUrl(url), options);
+                } catch (error) {
+                    if (!isNetworkError(error)) throw error;
+                    rememberRoute(url, 'direct');
+                    return fetch(url, options);
+                }
+            }
+            // Tiada ingatan: cuba terus dahulu
+            try {
+                const res = await fetch(url, options);
+                rememberRoute(url, 'direct');
+                return res;
+            } catch (error) {
+                if (!isNetworkError(error)) throw error;
+                rememberRoute(url, 'proxy');
+                return fetch(proxiedUrl(url), options);
+            }
         }
 
         async function testConnection() {
@@ -2918,11 +2990,10 @@ helloWorld();
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 15000);
                 
-                // Use proxy if enabled
-                const fetchUrl = getProxiedUrl(url);
-                console.log('Testing connection to:', fetchUrl);
+                // Mod auto: cuba terus, jika disekat cuba proxy
+                console.log('Testing connection to:', url);
                 
-                const response = await fetch(fetchUrl, {
+                const response = await smartFetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3256,11 +3327,10 @@ helloWorld();
                     if (!responseStarted) controller.abort();
                 }, timeoutSeconds * 1000);
 
-                // Use proxy if enabled
-                const fetchUrl = getProxiedUrl(finalUrl);
-                console.log('Sending AI request to:', fetchUrl);
+                // Mod auto: cuba terus, jika disekat (CORS/rangkaian) cuba proxy
+                console.log('Sending AI request to:', finalUrl);
 
-                const response = await fetch(fetchUrl, {
+                const response = await smartFetch(finalUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3324,7 +3394,7 @@ helloWorld();
                     errorMsg += '4. Browser menyekat permintaan (mixed content HTTPS/HTTP)\n\n';
                     errorMsg += 'URL dicuba: ' + finalUrl + '\n';
                     errorMsg += 'Provider: ' + (provider.name || 'default') + ' | Model: ' + model + '\n\n';
-                    errorMsg += 'Jika URL bermula dengan proxy.cors.sh, matikan "Guna CORS Proxy" di Tetapan.';
+                    errorMsg += 'Mod sambungan semasa: ' + getProxyMode() + ' (Auto cuba terus + proxy cors.sh).';
                 } else {
                     errorMsg += error.message;
                 }
@@ -3905,14 +3975,14 @@ helloWorld();
             loadSettings();
             loadTokenUsage();
 
-            // Migrasi sehingga sekali: cloud lama mungkin masih mengandungi
-            // useProxy=true (era cors.sh percuma) yang merosakkan sambungan.
-            // Padam nilai tersimpan supaya lalai (terus, tanpa proxy) digunakan.
-            if (localStorage.getItem('omnicode-use-proxy-migrated') !== 'v2') {
+            // Migrasi sehingga sekali: padam flag proxy era lama (cors.sh dipaksa
+            // atau dilangkau) - kini mod 'auto' mengurus laluan secara automatik.
+            if (localStorage.getItem('omnicode-proxy-migrated') !== 'v3') {
                 localStorage.removeItem('omnicode-use-proxy');
-                localStorage.setItem('omnicode-use-proxy-migrated', 'v2');
-                document.getElementById('setting-use-proxy').checked = false;
-                console.log('Proxy flag migrated: direct connection now default');
+                if (!localStorage.getItem('omnicode-proxy-mode')) {
+                    localStorage.setItem('omnicode-proxy-mode', 'auto');
+                }
+                localStorage.setItem('omnicode-proxy-migrated', 'v3');
             }
             
             // Initialize Firebase Auth
