@@ -543,12 +543,23 @@
                         <p class="text-xs text-gray-500 mt-1">Masa maksimum menunggu respons <b>pertama</b> daripada AI. Selepas AI mula menjawab, tiada had masa — jawapan akan dibiarkan lengkap.</p>
                     </div>
 
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Panjang Maksimum Jawapan (max_tokens)</label>
+                        <select id="setting-max-tokens" class="w-full bg-[#3c3c3c] border border-vsborder rounded p-2 text-white focus:border-vsblue focus:outline-none">
+                            <option value="2048">2,048 token (pendek)</option>
+                            <option value="4096" selected>4,096 token (seimbang)</option>
+                            <option value="8192">8,192 token (panjang)</option>
+                            <option value="16384">16,384 token (sangat panjang)</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">Jawapan yang terpotong biasanya disebabkan had ini. Nilai besar = jawapan lebih panjang tetapi lebih lambat.</p>
+                    </div>
+
                     <div class="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3">
                         <label class="flex items-center cursor-pointer">
-                            <input type="checkbox" id="setting-stream" class="mr-2 rounded">
+                            <input type="checkbox" id="setting-stream" class="mr-2 rounded" checked>
                             <div>
-                                <span class="text-sm font-medium text-blue-300">Mod Streaming (Beta)</span>
-                                <p class="text-xs text-gray-400">Paparkan respons secara beransur-ansur. Lebih pantas untuk interaksi, tetapi mungkin tidak stabil untuk semua model.</p>
+                                <span class="text-sm font-medium text-blue-300">Mod Streaming</span>
+                                <p class="text-xs text-gray-400">Jawapan dipaparkan sebaik sahaja ia dijana - lebih pantas dan tidak tersekat-sekat. Disyorkan aktif.</p>
                             </div>
                         </label>
                     </div>
@@ -2730,7 +2741,8 @@ helloWorld();
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
             document.getElementById('setting-proxy-mode').value = getProxyMode();
             document.getElementById('setting-timeout').value = localStorage.getItem('omnicode-timeout') || '60';
-            document.getElementById('setting-stream').checked = localStorage.getItem('omnicode-stream') === 'true';
+            document.getElementById('setting-max-tokens').value = localStorage.getItem('omnicode-max-tokens') || '4096';
+            document.getElementById('setting-stream').checked = localStorage.getItem('omnicode-stream') !== 'false';
             
             // Firebase settings
             document.getElementById('setting-firebase-apiKey').value = localStorage.getItem('firebase-apiKey') || '';
@@ -2774,6 +2786,7 @@ helloWorld();
             const prompt = document.getElementById('setting-prompt').value.trim();
             const proxyMode = document.getElementById('setting-proxy-mode').value;
             const timeout = document.getElementById('setting-timeout').value;
+            const maxTokens = document.getElementById('setting-max-tokens').value;
             const useStream = document.getElementById('setting-stream').checked;
             
             // Auto-append /chat/completions if not present and URL ends with /v1
@@ -2787,6 +2800,7 @@ helloWorld();
             localStorage.setItem('omnicode-prompt', prompt);
             localStorage.setItem('omnicode-proxy-mode', proxyMode);
             localStorage.setItem('omnicode-timeout', timeout);
+            localStorage.setItem('omnicode-max-tokens', maxTokens);
             localStorage.setItem('omnicode-stream', useStream);
             
             showNotification('Tetapan berjaya disimpan!');
@@ -2809,7 +2823,8 @@ helloWorld();
                         model: localStorage.getItem('omnicode-model') || '',
                         prompt: localStorage.getItem('omnicode-prompt') || '',
                         timeout: localStorage.getItem('omnicode-timeout') || '60',
-                        useStream: localStorage.getItem('omnicode-stream') === 'true'
+                        maxTokens: localStorage.getItem('omnicode-max-tokens') || '4096',
+                        useStream: localStorage.getItem('omnicode-stream') !== 'false'
                     },
                     chatMode: chatMode,
                     lastSettingsSync: firebase.firestore.FieldValue.serverTimestamp()
@@ -2839,6 +2854,7 @@ helloWorld();
                     // peranti ini) dan versi lama cloud menyimpan nilai true yang
                     // rosak sambungan cors.sh. Kekal nilai tempatan.
                     if (settings.timeout) localStorage.setItem('omnicode-timeout', settings.timeout);
+                    if (settings.maxTokens) localStorage.setItem('omnicode-max-tokens', settings.maxTokens);
                     if (settings.useStream !== undefined) localStorage.setItem('omnicode-stream', settings.useStream);
                     
                     // Load chat mode
@@ -3284,13 +3300,27 @@ helloWorld();
 
             const responseId = 'msg-' + Date.now();
             appendMessage('ai', 'Sedang memikirkan...', responseId, true);
+            const pendingEl = document.getElementById(responseId);
+            const waitStart = Date.now();
+            const waitTimer = setInterval(() => {
+                const secs = Math.round((Date.now() - waitStart) / 1000);
+                const pendingContent = pendingEl?.querySelector('.prose');
+                if (pendingContent && pendingContent.textContent.includes('Sedang memikirkan')) {
+                    pendingContent.innerHTML = 'Sedang memikirkan... <span class="text-gray-500 text-xs">' + secs + 's</span>';
+                } else {
+                    clearInterval(waitTimer);
+                }
+            }, 1000);
 
-            // Limit code context to prevent timeout (max 2000 chars for faster response)
+            // Konteks kod lebih besar (6000 aksara) supaya AI nampak kod hampir
+            // penuh - jawapan lebih tepat. Sejarah chat dinaikkan kepada 5 mesej
+            // terakhir untuk konteks perbualan yang lebih baik.
             let codeContext = currentCode;
-            if (currentCode.length > 2000) {
-                codeContext = currentCode.substring(0, 2000) + '\n\n... [kod dipendekkan untuk respons lebih pantas] ...';
+            if (currentCode.length > 6000) {
+                codeContext = currentCode.substring(0, 6000) + '\n\n... [kod dipendekkan - ' + currentCode.length.toLocaleString('ms-MY') + ' aksara jumlah] ...';
             }
 
+            const maxTokens = parseInt(localStorage.getItem('omnicode-max-tokens') || '4096');
             const payload = {
                 model: model,
                 messages: [
@@ -3298,15 +3328,15 @@ helloWorld();
                         role: "system", 
                         content: getChatModePrompt() + "\n\n" + sysPrompt + "\n\nKonteks kod fail semasa (" + currentFileName + "):\n```" + currentLanguage + "\n" + codeContext + "\n```"
                     },
-                    ...chatHistory.slice(-3), // Keep last 3 messages only for faster context
+                    ...chatHistory.slice(-5), // 5 mesej terakhir untuk konteks lebih baik
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.7,
-                max_tokens: 2048 // Limit response length for faster generation
+                max_tokens: maxTokens
             };
 
             // Add streaming flag if enabled
-            const useStream = localStorage.getItem('omnicode-stream') === 'true';
+            const useStream = localStorage.getItem('omnicode-stream') !== 'false';
             if (useStream) {
                 payload.stream = true;
             }
@@ -3330,7 +3360,7 @@ helloWorld();
                 // Mod auto: cuba terus, jika disekat (CORS/rangkaian) cuba proxy
                 console.log('Sending AI request to:', finalUrl);
 
-                const response = await smartFetch(finalUrl, {
+                let response = await smartFetch(finalUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3343,9 +3373,31 @@ helloWorld();
                     throw fetchError;
                 });
 
+                // Sesetengah provider menolak max_tokens yang melebihi had model.
+                // Jika 400 dan mesej menyebut max_tokens/token, cuba sekali lagi
+                // tanpa had - biar provider guna lalainya sendiri.
+                if (response.status === 400) {
+                    const errText = await response.clone().text().catch(() => '');
+                    if (/max_tokens|maximum.*token|token.*limit/i.test(errText)) {
+                        console.warn('Provider menolak max_tokens=' + maxTokens + ', mencuba semula tanpa had...');
+                        const retryPayload = { ...payload };
+                        delete retryPayload.max_tokens;
+                        response = await smartFetch(finalUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${key}`
+                            },
+                            body: JSON.stringify(retryPayload),
+                            signal: controller.signal
+                        });
+                    }
+                }
+
                 // Respons diterima - AI sudah mula menjawab, matikan timer sepenuhnya
                 responseStarted = true;
                 clearTimeout(timeoutId);
+                clearInterval(waitTimer);
 
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => '');
@@ -3364,10 +3416,12 @@ helloWorld();
                     }
 
                     const aiText = data.choices[0].message.content;
+                    const finishReason = data.choices[0].finish_reason;
                     trackTokenUsage(data, payload, aiText);
                     
                     chatHistory.push({ role: "assistant", content: aiText });
                     updateMessage(responseId, aiText);
+                    if (finishReason === 'length') appendTruncationNotice(responseId);
                     
                     // Auto-apply code to editor if auto-edit is enabled
                     autoApplyCode(aiText);
@@ -3402,6 +3456,7 @@ helloWorld();
                 updateMessage(responseId, errorMsg);
             } finally {
                 isSending = false;
+                clearInterval(waitTimer);
                 sendBtn.disabled = false;
                 sendBtn.classList.remove('sending');
                 sendBtn.innerHTML = '<i class="fas fa-paper-plane text-xs"></i>';
@@ -3713,7 +3768,40 @@ helloWorld();
             addCodeBlockButtons(msgDiv);
         }
 
-        // Streaming response handler
+        // Notis pemotongan jawapan (finish_reason = length) dengan butang
+        // untuk menyambung jawapan secara automatik
+        function appendTruncationNotice(responseId) {
+            const msgDiv = document.getElementById(responseId);
+            if (!msgDiv) return;
+            const notice = document.createElement('div');
+            notice.className = 'mt-2 p-2 bg-yellow-900/30 border border-yellow-700/60 rounded text-xs flex items-center justify-between gap-2';
+            notice.innerHTML = `
+                <span class="text-yellow-300"><i class="fas fa-exclamation-triangle mr-1"></i>Jawapan terpotong kerana had max_tokens.</span>
+                <button onclick="continueTruncatedResponse()" class="bg-yellow-700 hover:bg-yellow-600 text-white px-2 py-1 rounded shrink-0 transition-colors">
+                    <i class="fas fa-forward mr-1"></i>Sambung
+                </button>
+            `;
+            msgDiv.appendChild(notice);
+            scrollToBottom();
+        }
+
+        // Sambung jawapan terpotong: minta AI teruskan dari tempat ia berhenti
+        async function continueTruncatedResponse() {
+            if (isSending) return;
+            // Ambil mesej assistant terakhir dan minta sambungan
+            const lastAssistant = [...chatHistory].reverse().find(m => m.role === 'assistant');
+            if (!lastAssistant) {
+                showNotification('Tiada jawapan untuk disambung.');
+                return;
+            }
+            const inputEl = document.getElementById('chat-input');
+            inputEl.value = 'Teruskan jawapan anda dari tempat anda berhenti tepat tadi. Jangan ulang kandungan yang telah diberikan, teruskan sahaja.';
+            sendChatMessage();
+        }
+
+        // Streaming response handler - render di-throttle (maksimum ~5 kali saat)
+        // supaya UI kekal pantas walaupun jawapan panjang; teks penuh disimpan
+        // dan di-render sekali sahaja di akhir.
         async function handleStreamingResponse(response, responseId, promptTextForUsage = '') {
             const msgDiv = document.getElementById(responseId);
             if (!msgDiv) return;
@@ -3727,6 +3815,8 @@ helloWorld();
             const contentBox = msgDiv.querySelector('.prose');
             let fullText = '';
             let buffer = '';
+            let finishReason = null;
+            let lastRender = 0;
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -3748,11 +3838,18 @@ helloWorld();
                             try {
                                 const parsed = JSON.parse(data);
                                 const content = parsed.choices?.[0]?.delta?.content || '';
+                                if (parsed.choices?.[0]?.finish_reason) {
+                                    finishReason = parsed.choices[0].finish_reason;
+                                }
                                 if (content) {
                                     fullText += content;
-                                    // Update UI with partial text (render as plain text first for speed)
-                                    contentBox.innerHTML = marked.parse(fullText);
-                                    scrollToBottom();
+                                    // Throttle: render maksimum setiap 200ms
+                                    const now = Date.now();
+                                    if (now - lastRender > 200) {
+                                        lastRender = now;
+                                        contentBox.innerHTML = marked.parse(fullText);
+                                        scrollToBottom();
+                                    }
                                 }
                             } catch (e) {
                                 // Skip invalid JSON lines
@@ -3764,6 +3861,7 @@ helloWorld();
                 // Final update with full markdown parsing
                 contentBox.innerHTML = marked.parse(fullText);
                 addCodeBlockButtons(msgDiv);
+                if (finishReason === 'length') appendTruncationNotice(responseId);
                 
                 // Track token usage for this streamed response
                 trackTokenUsageChunk(promptTextForUsage, fullText);
