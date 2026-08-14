@@ -534,7 +534,7 @@
                             <option value="180">180 saat (3 minit)</option>
                             <option value="300">300 saat (5 minit)</option>
                         </select>
-                        <p class="text-xs text-gray-500 mt-1">Masa maksimum menunggu respons AI. Model besar perlukan masa lebih lama.</p>
+                        <p class="text-xs text-gray-500 mt-1">Masa maksimum menunggu respons <b>pertama</b> daripada AI. Selepas AI mula menjawab, tiada had masa — jawapan akan dibiarkan lengkap.</p>
                     </div>
 
                     <div class="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3">
@@ -3144,7 +3144,13 @@ helloWorld();
             try {
                 const controller = new AbortController();
                 const timeoutSeconds = parseInt(localStorage.getItem('omnicode-timeout') || '60');
-                const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+                // Timeout hanya untuk menunggu respons PERTAMA daripada pelayan.
+                // Selepas AI mula memberi respons, timer dibatalkan dan permintaan
+                // dibiarkan berjalan sehingga selesai (tiada had masa penjanaan).
+                let responseStarted = false;
+                const timeoutId = setTimeout(() => {
+                    if (!responseStarted) controller.abort();
+                }, timeoutSeconds * 1000);
 
                 // Use proxy if enabled
                 const fetchUrl = getProxiedUrl(finalUrl);
@@ -3163,6 +3169,8 @@ helloWorld();
                     throw fetchError;
                 });
 
+                // Respons diterima - AI sudah mula menjawab, matikan timer sepenuhnya
+                responseStarted = true;
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
@@ -3198,7 +3206,7 @@ helloWorld();
                 let errorMsg = 'Ralat penyambungan: ';
                 const timeoutSeconds = parseInt(localStorage.getItem('omnicode-timeout') || '60');
                 if (error.name === 'AbortError') {
-                    errorMsg += 'Permintaan tamat masa (' + timeoutSeconds + ' saat). Cuba lagi atau tingkatkan timeout di Tetapan.';
+                    errorMsg += 'Pelayan tidak memberi respons dalam ' + timeoutSeconds + ' saat. Cuba lagi atau tingkatkan timeout di Tetapan.';
                 } else if (error.message.includes('504') || error.message.includes('timeout')) {
                     errorMsg += 'Pelayan timeout (504). Model AI mengambil masa terlalu lama.\n\nCadangan:\n';
                     errorMsg += '• Guna model yang lebih kecil/pantas\n';
