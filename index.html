@@ -464,10 +464,10 @@
 
                     <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3">
                         <label class="flex items-center cursor-pointer">
-                            <input type="checkbox" id="setting-use-proxy" class="mr-2 rounded" checked>
+                            <input type="checkbox" id="setting-use-proxy" class="mr-2 rounded">
                             <div>
                                 <span class="text-sm font-medium text-yellow-300">Guna CORS Proxy (cors.sh)</span>
-                                <p class="text-xs text-gray-400">Aktifkan jika mendapat ralat "Failed to fetch" atau CORS. Percuma dan selamat.</p>
+                                <p class="text-xs text-gray-400">Lalai TIDAK aktif - kebanyakan provider sokong CORS terus. Aktifkan hanya jika mendapat ralat "Failed to fetch" DAN anda ada API key cors.sh sendiri (percuma tidak lagi disediakan).</p>
                             </div>
                         </label>
                     </div>
@@ -522,6 +522,8 @@
                             <input type="password" id="custom-provider-key" placeholder="API Key" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
                             <input type="text" id="custom-provider-model" placeholder="Nama model (cth: llama-3.1-8b-instant)" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
                             <input type="text" id="custom-provider-prompt" placeholder="System prompt khusus (pilihan)" class="w-full bg-[#1e1e1e] border border-vsborder rounded p-2 text-white text-sm focus:border-vsblue focus:outline-none">
+                            <button type="button" onclick="testCustomProviderConnection()" class="w-full text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded transition-colors"><i class="fas fa-plug mr-1"></i>Uji Sambungan Profil Ini</button>
+                            <div id="custom-provider-test-result" class="text-xs hidden"></div>
                         </div>
                     </div>
 
@@ -2339,6 +2341,14 @@ helloWorld();
             return localStorage.getItem(getUserKey('droidlink-use-custom-provider')) === 'true';
         }
 
+        function getActiveProviderName() {
+            return localStorage.getItem(getUserKey('droidlink-active-provider-name')) || '';
+        }
+
+        function setActiveProviderName(name) {
+            localStorage.setItem(getUserKey('droidlink-active-provider-name'), name || '');
+        }
+
         function toggleCustomProviderUI() {
             const enabled = document.getElementById('setting-custom-provider').checked;
             document.getElementById('custom-provider-fields').classList.toggle('hidden', !enabled);
@@ -2351,11 +2361,79 @@ helloWorld();
             }
         }
 
-        function refreshCustomProviderProfiles() {
+        function refreshCustomProviderProfiles(selectedName = null) {
             const select = document.getElementById('custom-provider-profile');
             const providers = getCustomProviders();
             const names = Object.keys(providers);
-            select.innerHTML = '<option value="">-- Pilih Profil --</option>' + names.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)}</option>`).join('');
+            const active = selectedName !== null ? selectedName : getActiveProviderName();
+            select.innerHTML = '<option value="">-- Pilih Profil --</option>' + names.map(n => `<option value="${escapeHTML(n)}" ${n === active ? 'selected' : ''}>${escapeHTML(n)}</option>`).join('');
+        }
+
+        function selectCustomProviderProfile(name) {
+            setActiveProviderName(name);
+            const profile = name ? getCustomProviders()[name] : null;
+            if (profile) {
+                document.getElementById('custom-provider-name').value = name;
+                document.getElementById('custom-provider-url').value = profile.url || '';
+                document.getElementById('custom-provider-key').value = profile.key || '';
+                document.getElementById('custom-provider-model').value = profile.model || '';
+                document.getElementById('custom-provider-prompt').value = profile.prompt || '';
+            }
+        }
+
+        // Uji sambungan menggunakan medan profil yang sedang ditaip
+        // (tidak perlu disimpan dahulu)
+        async function testCustomProviderConnection() {
+            const resultEl = document.getElementById('custom-provider-test-result');
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = '<span class="text-yellow-400"><i class="fas fa-spinner fa-spin mr-1"></i>Menguji...';
+
+            let url = document.getElementById('custom-provider-url').value.trim();
+            const key = document.getElementById('custom-provider-key').value.trim();
+            const model = document.getElementById('custom-provider-model').value.trim();
+
+            if (!url || !key) {
+                resultEl.innerHTML = '<span class="text-red-400">Sila isi URL dan API key dahulu.</span>';
+                return;
+            }
+            if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
+                url = url + '/chat/completions';
+            }
+
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + key
+                    },
+                    body: JSON.stringify({
+                        model: model || 'gpt-3.5-turbo',
+                        messages: [{ role: 'user', content: 'test' }],
+                        max_tokens: 5
+                    }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya!</span>';
+                } else {
+                    const errorText = await response.text().catch(() => '');
+                    let hint = '';
+                    if (response.status === 401 || response.status === 403) hint = ' (semak API key)';
+                    if (response.status === 404) hint = ' (semak URL - perlu berakhir dengan /chat/completions)';
+                    resultEl.innerHTML = '<span class="text-red-400"><i class="fas fa-times-circle mr-1"></i>Ralat ' + response.status + hint + ': ' + (errorText || response.statusText).substring(0, 120) + '</span>';
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    resultEl.innerHTML = '<span class="text-red-400">Timeout - pelayan tidak menjawab dalam 15 saat.</span>';
+                } else {
+                    resultEl.innerHTML = '<span class="text-red-400"><i class="fas fa-times-circle mr-1"></i>Gagal: ' + error.message + ' - kemungkinan CORS disekat atau URL salah.</span>';
+                }
+            }
         }
 
         function saveCustomProviderProfile() {
@@ -2374,21 +2452,15 @@ helloWorld();
             const isNew = !providers[name];
             providers[name] = { url, key, model, prompt };
             saveCustomProviders(providers);
-            refreshCustomProviderProfiles();
-            document.getElementById('custom-provider-profile').value = name;
+            setActiveProviderName(name);
+            refreshCustomProviderProfiles(name);
             showNotification(isNew ? 'Profil "' + name + '" disimpan!' : 'Profil "' + name + '" dikemas kini!');
         }
 
         function loadCustomProviderProfile() {
             const name = document.getElementById('custom-provider-profile').value;
             if (!name) return;
-            const profile = getCustomProviders()[name];
-            if (!profile) return;
-            document.getElementById('custom-provider-name').value = name;
-            document.getElementById('custom-provider-url').value = profile.url || '';
-            document.getElementById('custom-provider-key').value = profile.key || '';
-            document.getElementById('custom-provider-model').value = profile.model || '';
-            document.getElementById('custom-provider-prompt').value = profile.prompt || '';
+            selectCustomProviderProfile(name);
         }
 
         function deleteCustomProviderProfile() {
@@ -2401,6 +2473,9 @@ helloWorld();
             const providers = getCustomProviders();
             delete providers[name];
             saveCustomProviders(providers);
+            if (getActiveProviderName() === name) {
+                setActiveProviderName('');
+            }
             refreshCustomProviderProfiles();
             document.getElementById('custom-provider-name').value = '';
             document.getElementById('custom-provider-url').value = '';
@@ -2412,22 +2487,25 @@ helloWorld();
 
         function getActiveProvider() {
             if (isCustomProviderActive()) {
-                const name = document.getElementById('custom-provider-profile')?.value;
+                const name = getActiveProviderName();
                 const profile = name ? getCustomProviders()[name] : null;
-                if (profile) {
+                if (profile && profile.url && profile.key && profile.model) {
                     return {
                         url: profile.url,
                         key: profile.key,
                         model: profile.model,
-                        sysPrompt: profile.prompt || localStorage.getItem('omnicode-prompt') || ''
+                        sysPrompt: profile.prompt || localStorage.getItem('omnicode-prompt') || '',
+                        name: name
                     };
                 }
+                console.warn('Custom provider aktif tetapi profil tidak lengkap:', name, '- guna tetapan biasa');
             }
             return {
                 url: localStorage.getItem('omnicode-url') || 'https://api.openai.com/v1/chat/completions',
                 key: localStorage.getItem('omnicode-key') || '',
                 model: localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo',
-                sysPrompt: localStorage.getItem('omnicode-prompt') || ''
+                sysPrompt: localStorage.getItem('omnicode-prompt') || '',
+                name: 'default'
             };
         }
 
@@ -2645,7 +2723,7 @@ helloWorld();
             document.getElementById('setting-key').value = localStorage.getItem('omnicode-key') || '';
             document.getElementById('setting-model').value = localStorage.getItem('omnicode-model') || 'gpt-3.5-turbo';
             document.getElementById('setting-prompt').value = localStorage.getItem('omnicode-prompt') || 'Anda adalah pembantu pengaturcaraan pakar. Jawab dengan padat dan berikan kod yang lengkap.';
-            document.getElementById('setting-use-proxy').checked = localStorage.getItem('omnicode-use-proxy') !== 'false';
+            document.getElementById('setting-use-proxy').checked = localStorage.getItem('omnicode-use-proxy') === 'true';
             document.getElementById('setting-timeout').value = localStorage.getItem('omnicode-timeout') || '60';
             document.getElementById('setting-stream').checked = localStorage.getItem('omnicode-stream') === 'true';
             
@@ -2654,7 +2732,7 @@ helloWorld();
             document.getElementById('setting-firebase-authDomain').value = localStorage.getItem('firebase-authDomain') || '';
             document.getElementById('setting-firebase-projectId').value = localStorage.getItem('firebase-projectId') || '';
 
-            // Custom provider settings
+            // Custom provider settings - kekalkan profil aktif dalam dropdown
             const useCustom = localStorage.getItem(getUserKey('droidlink-use-custom-provider')) === 'true';
             document.getElementById('setting-custom-provider').checked = useCustom;
             document.getElementById('custom-provider-fields').classList.toggle('hidden', !useCustom);
@@ -2725,7 +2803,7 @@ helloWorld();
                         url: localStorage.getItem('omnicode-url') || '',
                         model: localStorage.getItem('omnicode-model') || '',
                         prompt: localStorage.getItem('omnicode-prompt') || '',
-                        useProxy: localStorage.getItem('omnicode-use-proxy') !== 'false',
+                        useProxy: localStorage.getItem('omnicode-use-proxy') === 'true',
                         timeout: localStorage.getItem('omnicode-timeout') || '60',
                         useStream: localStorage.getItem('omnicode-stream') === 'true'
                     },
@@ -2783,11 +2861,13 @@ helloWorld();
         }
 
         function getProxiedUrl(url) {
-            const useProxy = localStorage.getItem('omnicode-use-proxy') !== 'false';
+            const useProxy = localStorage.getItem('omnicode-use-proxy') === 'true';
             if (useProxy) {
-                // Use cors.sh proxy (free, reliable)
+                // Use cors.sh proxy (memerlukan API key cors.sh sendiri)
                 return 'https://proxy.cors.sh/' + url;
             }
+            // Lalai: sambungan terus - kebanyakan provider (OpenAI, Groq,
+            // OpenRouter, dll.) menyokong CORS terus dari browser
             return url;
         }
 
@@ -2796,8 +2876,10 @@ helloWorld();
             resultEl.classList.remove('hidden');
             resultEl.innerHTML = '<span class="text-yellow-400"><i class="fas fa-spinner fa-spin mr-1"></i>Menguji sambungan...</span>';
             
-            let url = document.getElementById('setting-url').value.trim();
-            const key = document.getElementById('setting-key').value.trim();
+            const provider = getActiveProvider();
+            let url = provider.url;
+            const key = provider.key;
+            const model = provider.model;
             
             // Auto-append /chat/completions if not present
             if (url.endsWith('/v1') && !url.includes('/chat/completions')) {
@@ -2829,7 +2911,7 @@ helloWorld();
                         'Authorization': 'Bearer ' + key
                     },
                     body: JSON.stringify({
-                        model: document.getElementById('setting-model').value.trim() || 'gpt-3.5-turbo',
+                        model: model || 'gpt-3.5-turbo',
                         messages: [{role: 'user', content: 'test'}],
                         max_tokens: 5
                     }),
@@ -2839,7 +2921,8 @@ helloWorld();
                 clearTimeout(timeoutId);
                 
                 if (response.ok) {
-                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya!</span>';
+                    const label = provider.name !== 'default' ? ' (profil: ' + provider.name + ')' : '';
+                    resultEl.innerHTML = '<span class="text-green-400"><i class="fas fa-check-circle mr-1"></i>Sambungan berjaya' + label + '!</span>';
                 } else {
                     const errorText = await response.text().catch(() => '');
                     resultEl.innerHTML = '<span class="text-red-400"><i class="fas fa-times-circle mr-1"></i>Ralat ' + response.status + ': ' + (errorText || response.statusText).substring(0, 100) + '</span>';
@@ -3085,7 +3168,7 @@ helloWorld();
 
             // Show the URL being used for debugging
             console.log('AI Request to:', finalUrl);
-            console.log('Model:', model);
+            console.log('Model:', model, '| Provider:', provider.name);
 
             if (!key) {
                 appendMessage('system', 'Ralat: Kunci API tidak ditemui. Sila masukkan di tab Tetapan.');
