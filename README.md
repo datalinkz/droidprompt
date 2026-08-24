@@ -72,6 +72,19 @@ Aplikasi ini direka khas untuk **menjimatkan penggunaan Firebase Spark Plan** (p
 
 ---
 
+## 📊 Penggunaan Token AI
+
+> **Nota**: Data di bawah adalah contoh format. Gunakan butang **"Export untuk README"** dalam aplikasi (panel Token) untuk menjana data sebenar dan tampal di sini.
+
+| Model | Input Token | Output Token | Jumlah Token | Requests |
+|-------|------------|-------------|-------------|----------|
+| gpt-3.5-turbo | 0 | 0 | 0 | 0 |
+
+> Data ini dikemas kini secara manual oleh pengguna.
+> Token dianggarkan menggunakan formula ~4 aksara = 1 token jika provider tidak memulakan data usage.
+
+---
+
 ## 🛠️ Teknologi yang Digunakan
 
 - **Frontend**: HTML5, Tailwind CSS, JavaScript (Vanilla)
