@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bersihkan Data Cloud - DroidLink</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #1e1e1e; color: #d4d4d4; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .vsbg { background: #1e1e1e; }
+        .vsnav { background: #252526; }
+        .vsborder { border-color: #3c3c3c; }
+        .vsblue { background: #0e639c; }
+        .vsblue:hover { background: #1177bb; }
+        pre { background: #0d0d0d; border: 1px solid #3c3c3c; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+    <div class="vsnav border vsborder rounded-lg p-6 max-w-md w-full">
+        <div class="text-center mb-6">
+            <div class="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-trash-alt text-white text-2xl"></i>
+            </div>
+            <h1 class="text-xl font-bold text-white">Bersihkan Data Cloud</h1>
+            <p class="text-sm text-gray-400 mt-2">Padam semua data rosak dari Firestore</p>
+        </div>
+
+        <div class="bg-yellow-900/30 border border-yellow-700 rounded p-3 mb-4">
+            <p class="text-xs text-yellow-300">
+                <i class="fas fa-exclamation-triangle mr-1"></i>
+                <strong>Amaran:</strong> Tindakan ini akan memadam SEMUA data anda di cloud termasuk chat history, workspace files, settings, dan prompt history. Data tempatan (localStorage) tidak akan terjejas.
+            </p>
+        </div>
+
+        <div id="status" class="hidden mb-4 p-3 rounded text-sm"></div>
+
+        <div class="space-y-3">
+            <button onclick="clearCloudData()" id="btn-clear" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
+                <i class="fas fa-cloud-upload-alt"></i>
+                Padam Data Cloud Saya
+            </button>
+            
+            <button onclick="clearLocalData()" class="w-full py-3 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
+                <i class="fas fa-hdd"></i>
+                Padam Data Tempatan Juga
+            </button>
+            
+            <a href="/" class="block w-full py-3 vsblue hover:bg-blue-600 text-white rounded-lg font-medium transition-colors text-center">
+                <i class="fas fa-arrow-left mr-2"></i>
+                Kembali ke Aplikasi
+            </a>
+        </div>
+
+        <div class="mt-6 pt-4 border-t vsborder">
+            <p class="text-xs text-gray-500 mb-2">Status Log Masuk:</p>
+            <div id="auth-status" class="text-xs text-gray-400">
+                <i class="fas fa-spinner fa-spin mr-1"></i> Menyemak...
+            </div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script>
+        let firebaseApp, firebaseAuth, firestoreDb, currentUser;
+
+        // Initialize Firebase
+        function initFirebase() {
+            const config = {
+                apiKey: "AIzaSyBDTGnU9eVNLOuYRUbHGxkNLjzjiojwTxo",
+                authDomain: "droidlink-eb984.firebaseapp.com",
+                projectId: "droidlink-eb984"
+            };
+            firebaseApp = firebase.initializeApp(config);
+            firebaseAuth = firebase.auth();
+            firestoreDb = firebase.firestore();
+            
+            firebaseAuth.onAuthStateChanged((user) => {
+                currentUser = user;
+                const statusEl = document.getElementById('auth-status');
+                if (user) {
+                    statusEl.innerHTML = `<i class="fas fa-check-circle text-green-400 mr-1"></i> Log masuk sebagai: ${user.email}`;
+                    statusEl.className = 'text-xs text-green-400';
+                } else {
+                    statusEl.innerHTML = `<i class="fas fa-times-circle text-red-400 mr-1"></i> Tidak log masuk. Sila log masuk di aplikasi utama dahulu.`;
+                    statusEl.className = 'text-xs text-red-400';
+                }
+            });
+        }
+
+        function showStatus(msg, type = 'info') {
+            const el = document.getElementById('status');
+            el.classList.remove('hidden');
+            const colors = {
+                info: 'bg-blue-900/50 border-blue-700 text-blue-300',
+                success: 'bg-green-900/50 border-green-700 text-green-300',
+                error: 'bg-red-900/50 border-red-700 text-red-300',
+                warning: 'bg-yellow-900/50 border-yellow-700 text-yellow-300'
+            };
+            el.className = `mb-4 p-3 rounded text-sm border ${colors[type]}`;
+            el.innerHTML = msg;
+        }
+
+        async function clearCloudData() {
+            if (!currentUser) {
+                showStatus('❌ Sila log masuk dahulu di aplikasi utama.', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btn-clear');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memadam...';
+
+            try {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                
+                // Get current data to show what's being deleted
+                const doc = await userRef.get();
+                const data = doc.exists ? doc.data() : {};
+                
+                // Delete the entire user document
+                await userRef.delete();
+                
+                showStatus(`✅ Data cloud berjaya dipadam!<br><br>
+                    <strong>Dipadamkan:</strong><br>
+                    ${Object.keys(data).map(k => `• ${k}`).join('<br>') || 'Tiada data'}<br><br>
+                    Anda boleh log masuk semula di aplikasi utama.`, 'success');
+                
+            } catch (e) {
+                console.error('Clear error:', e);
+                showStatus(`❌ Ralat: ${e.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Padam Data Cloud Saya';
+            }
+        }
+
+        function clearLocalData() {
+            if (!confirm('Adakah anda pasti mahu padam SEMUA data tempatan (localStorage) juga? Ini termasuk tetapan, sejarah, dan fail yang belum disimpan ke cloud.')) {
+                return;
+            }
+            
+            // Clear all localStorage keys related to the app
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.includes('droidlink') || key.includes('omnicode') || key.includes('firebase'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+            
+            showStatus(`✅ ${keysToRemove.length} item data tempatan dipadam.<br><br>
+                <strong>Dipadamkan:</strong><br>
+                ${keysToRemove.map(k => `• ${k}`).join('<br>')}`, 'success');
+        }
+
+        // Initialize on load
+        window.onload = initFirebase;
+    </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Wrangler CLI cache
+.wrangler/
+
+# Kilo Code cache
+.kilo/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (if any)
+node_modules/
