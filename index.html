@@ -643,6 +643,21 @@
                 </div>
 
                 <div class="pt-4 border-t border-vsborder">
+                    <h3 class="text-lg font-semibold text-white mb-2">Penggunaan Cloud (Spark Plan)</h3>
+                    <div id="cloud-usage" class="bg-[#1e1e1e] border border-vsborder rounded p-3 text-xs space-y-1">
+                        <p><span class="text-gray-500">Fail Workspace:</span> <span id="usage-files" class="text-gray-400">0 fail (0 KB)</span></p>
+                        <p><span class="text-gray-500">Sesi Chat:</span> <span id="usage-sessions" class="text-gray-400">0 sesi (0 KB)</span></p>
+                        <p><span class="text-gray-500">Sejarah Prompt:</span> <span id="usage-history" class="text-gray-400">0 item (0 KB)</span></p>
+                        <p><span class="text-gray-500">Chat Semasa:</span> <span id="usage-chat" class="text-gray-400">0 mesej (0 KB)</span></p>
+                        <p class="pt-1 border-t border-vsborder"><span class="text-gray-500 font-medium">Jumlah Anggaran:</span> <span id="usage-total" class="text-green-400 font-medium">0 KB</span></p>
+                        <p class="text-[10px] text-gray-600">Had Spark Plan: 1GB storan, 50K baca/hari, 20K tulis/hari</p>
+                    </div>
+                    <button onclick="showCloudUsage()" class="w-full mt-2 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded text-sm font-medium transition-colors">
+                        <i class="fas fa-chart-pie mr-1"></i>Semak Penggunaan
+                    </button>
+                </div>
+
+                <div class="pt-4 border-t border-vsborder">
                     <h3 class="text-lg font-semibold text-white mb-2">Akaun</h3>
                     <p class="text-xs text-gray-400 mb-3" id="current-user-email">Tiada pengguna log masuk</p>
                     <button onclick="signOut()" class="w-full py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium transition-colors">
@@ -816,6 +831,101 @@
             return ALLOWED_EMAIL_HASHES.includes(hash);
         }
 
+        // ============================================
+        // FIREBASE SPARK PLAN OPTIMIZATION
+        // ============================================
+        const CLOUD_LIMITS = {
+            MAX_FILES: 20,              // Had bilangan fail
+            MAX_FILE_SIZE: 500 * 1024,  // 500KB per fail
+            MAX_TOTAL_SIZE: 2 * 1024 * 1024, // 2MB keseluruhan
+            MAX_CHAT_SESSIONS: 10,      // Had sesi chat
+            MAX_PROMPT_HISTORY: 30,     // Had sejarah prompt
+            MAX_CHAT_MESSAGES: 50,      // Had mesej chat semasa
+            SYNC_DEBOUNCE_MS: 5000,     // 5 saat debounce
+            IDLE_TIMEOUT_MS: 5 * 60 * 1000 // 5 minit idle = matikan sync
+        };
+        
+        // Strip HTML dari chat untuk simpanan cloud (jimat ruang)
+        function stripHtmlForCloud(html) {
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            return div.textContent || div.innerText || '';
+        }
+        
+        // Semak dan potong data mengikut had
+        function enforceCloudLimits() {
+            // 1. Hadkan bilangan fail
+            const fileNames = Object.keys(workspaceFiles);
+            if (fileNames.length > CLOUD_LIMITS.MAX_FILES) {
+                // Kekalkan fail yang paling baru diubah
+                const sorted = fileNames.sort((a, b) => {
+                    return (localStorage.getItem('droidlink-file-mtime-' + b) || 0) - 
+                           (localStorage.getItem('droidlink-file-mtime-' + a) || 0);
+                });
+                const toRemove = sorted.slice(CLOUD_LIMITS.MAX_FILES);
+                toRemove.forEach(name => delete workspaceFiles[name]);
+                console.log('Cloud limits: removed', toRemove.length, 'old files');
+            }
+            
+            // 2. Hadkan saiz fail individu
+            let totalSize = 0;
+            const filesToTrim = [];
+            for (const [name, content] of Object.entries(workspaceFiles)) {
+                if (content.length > CLOUD_LIMITS.MAX_FILE_SIZE) {
+                    filesToTrim.push(name);
+                }
+                totalSize += content.length;
+            }
+            filesToTrim.forEach(name => {
+                workspaceFiles[name] = workspaceFiles[name].substring(0, CLOUD_LIMITS.MAX_FILE_SIZE) + 
+                    '\n\n// ... [DIPOTONG: Fail melebihi had 500KB untuk penjimatan cloud] ...';
+            });
+            
+            // 3. Hadkan saiz keseluruhan
+            if (totalSize > CLOUD_LIMITS.MAX_TOTAL_SIZE) {
+                console.warn('Total file size exceeds limit:', totalSize);
+                // Potong fail terbesar sehingga cukup
+                const sortedBySize = Object.entries(workspaceFiles)
+                    .sort((a, b) => b[1].length - a[1].length);
+                for (const [name, content] of sortedBySize) {
+                    if (totalSize <= CLOUD_LIMITS.MAX_TOTAL_SIZE) break;
+                    const excess = totalSize - CLOUD_LIMITS.MAX_TOTAL_SIZE;
+                    const trimAmount = Math.min(excess, content.length - 10000); // Kekalkan min 10KB
+                    if (trimAmount > 0) {
+                        workspaceFiles[name] = content.substring(0, content.length - trimAmount) + 
+                            '\n\n// ... [DIPOTONG: Had saiz cloud] ...';
+                        totalSize -= trimAmount;
+                    }
+                }
+            }
+            
+            // 4. Hadkan sejarah prompt
+            if (promptHistory.length > CLOUD_LIMITS.MAX_PROMPT_HISTORY) {
+                promptHistory = promptHistory.slice(0, CLOUD_LIMITS.MAX_PROMPT_HISTORY);
+            }
+            
+            // 5. Hadkan sesi chat
+            if (chatSessions.length > CLOUD_LIMITS.MAX_CHAT_SESSIONS) {
+                chatSessions = chatSessions.slice(0, CLOUD_LIMITS.MAX_CHAT_SESSIONS);
+            }
+            
+            // 6. Hadkan mesej chat semasa
+            if (chatHistory.length > CLOUD_LIMITS.MAX_CHAT_MESSAGES) {
+                chatHistory = chatHistory.slice(-CLOUD_LIMITS.MAX_CHAT_MESSAGES);
+            }
+        }
+        
+        // Debounce timer untuk sync
+        let syncDebounceTimer = null;
+        function debouncedSyncToCloud(syncFn, immediate = false) {
+            if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+            if (immediate) {
+                syncFn();
+            } else {
+                syncDebounceTimer = setTimeout(syncFn, CLOUD_LIMITS.SYNC_DEBOUNCE_MS);
+            }
+        }
+        
         // State variables
         let currentTab = 'editor';
         let chatHistory = [];
@@ -945,6 +1055,9 @@
         // ============================================
         async function syncFilesToCloud() {
             if (!firestoreDb || !currentUser) return;
+            
+            // Enforce limits before syncing
+            enforceCloudLimits();
             
             try {
                 const userRef = firestoreDb.collection('users').doc(currentUser.uid);
@@ -1076,10 +1189,14 @@
                 return;
             }
 
+            isFileOperationInProgress = true;
             workspaceFiles[cleanName] = '';
             saveWorkspaceFiles();
             renderFileList();
             openFile(cleanName);
+            syncFilesToCloud().finally(() => {
+                setTimeout(() => { isFileOperationInProgress = false; }, 1000);
+            });
             showNotification('Fail baharu dicipta!');
         }
 
@@ -1093,6 +1210,7 @@
                 return;
             }
 
+            isFileOperationInProgress = true;
             workspaceFiles[cleanName] = workspaceFiles[oldName];
             delete workspaceFiles[oldName];
             
@@ -1104,11 +1222,17 @@
 
             saveWorkspaceFiles();
             renderFileList();
+            syncFilesToCloud().finally(() => {
+                setTimeout(() => { isFileOperationInProgress = false; }, 1000);
+            });
             showNotification('Nama fail ditukar!');
         }
 
         function deleteFile(filename) {
             if (!confirm('Padam fail "' + filename + '"? Tindakan ini tidak boleh diundur.')) return;
+
+            // Set flag to prevent real-time sync from restoring deleted files
+            isFileOperationInProgress = true;
 
             delete workspaceFiles[filename];
 
@@ -1123,8 +1247,15 @@
                 }
             }
 
+            // Save locally first
             saveWorkspaceFiles();
             renderFileList();
+            
+            // Then sync to cloud with proper flag reset
+            syncFilesToCloud().finally(() => {
+                setTimeout(() => { isFileOperationInProgress = false; }, 1000);
+            });
+            
             showNotification('Fail dipadam!');
         }
 
@@ -1154,6 +1285,7 @@
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
+            isFileOperationInProgress = true;
             let loaded = 0;
             Array.from(files).forEach(file => {
                 const reader = new FileReader();
@@ -1163,6 +1295,9 @@
                     if (loaded === files.length) {
                         saveWorkspaceFiles();
                         renderFileList();
+                        syncFilesToCloud().finally(() => {
+                            setTimeout(() => { isFileOperationInProgress = false; }, 1000);
+                        });
                         showNotification(files.length + ' fail berjaya dimuat naik!');
                         openFile(file.name);
                     }
@@ -1177,6 +1312,7 @@
             const files = event.target.files;
             if (!files || files.length === 0) return;
 
+            isFileOperationInProgress = true;
             let loaded = 0;
             Array.from(files).forEach(file => {
                 // Use relative path as filename (keeps folder structure)
@@ -1188,6 +1324,9 @@
                     if (loaded === files.length) {
                         saveWorkspaceFiles();
                         renderFileList();
+                        syncFilesToCloud().finally(() => {
+                            setTimeout(() => { isFileOperationInProgress = false; }, 1000);
+                        });
                         showNotification(files.length + ' fail dari folder berjaya dimuat naik!');
                     }
                 };
@@ -1763,7 +1902,7 @@ helloWorld();
                     }
                     
                     // Sync chat conversation (with validation & error handling)
-                    if (data.chatConversation && data.chatConversation.html) {
+                    if (data.chatConversation && data.chatConversation.html && !isNewChatInProgress) {
                         try {
                             const chatBox = document.getElementById('chat-history');
                             if (!chatBox) return;
@@ -1809,7 +1948,7 @@ helloWorld();
                     }
 
                     // Sync workspace files (with error handling)
-                    if (data.workspaceFiles && typeof data.workspaceFiles === 'object') {
+                    if (data.workspaceFiles && typeof data.workspaceFiles === 'object' && !isFileOperationInProgress) {
                         try {
                             const cloudFilesStr = JSON.stringify(data.workspaceFiles);
                             const localFilesStr = JSON.stringify(workspaceFiles);
@@ -1952,8 +2091,8 @@ helloWorld();
             
             showNotification('Mod ' + chatModes[mode].name + ' diaktifkan!');
             
-            // Sync mode to cloud
-            syncSettingsToCloud();
+            // Sync mode to cloud (debounced to save writes)
+            debouncedSyncToCloud(syncSettingsToCloud);
         }
 
         function loadChatMode() {
@@ -2016,6 +2155,11 @@ helloWorld();
         async function syncHistoryToCloud() {
             if (!firestoreDb || !currentUser || isSyncing) return;
             
+            // Enforce limits
+            if (promptHistory.length > CLOUD_LIMITS.MAX_PROMPT_HISTORY) {
+                promptHistory = promptHistory.slice(0, CLOUD_LIMITS.MAX_PROMPT_HISTORY);
+            }
+            
             isSyncing = true;
             try {
                 const userRef = firestoreDb.collection('users').doc(currentUser.uid);
@@ -2034,19 +2178,27 @@ helloWorld();
         async function syncChatToCloud() {
             if (!firestoreDb || !currentUser || chatHistory.length === 0) return;
             
+            // Enforce limits - keep only recent messages
+            if (chatHistory.length > CLOUD_LIMITS.MAX_CHAT_MESSAGES) {
+                chatHistory = chatHistory.slice(-CLOUD_LIMITS.MAX_CHAT_MESSAGES);
+            }
+            
             try {
                 const userRef = firestoreDb.collection('users').doc(currentUser.uid);
                 const chatBox = document.getElementById('chat-history');
                 
+                // Store text-only version to save space (strip HTML)
+                const htmlText = stripHtmlForCloud(chatBox.innerHTML);
+                
                 await userRef.set({
                     chatConversation: {
                         history: chatHistory,
-                        html: chatBox.innerHTML,
+                        textPreview: htmlText.substring(0, 5000), // Store only first 5000 chars as preview
                         savedAt: new Date().toISOString()
                     },
                     lastSync: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-                console.log('Chat synced to cloud');
+                console.log('Chat synced to cloud (text-only)');
             } catch (error) {
                 console.warn('Failed to sync chat to cloud:', error);
             }
@@ -2058,23 +2210,51 @@ helloWorld();
                 return;
             }
             
-            if (chatHistory.length === 0 && promptHistory.length === 0) {
-                showNotification('Tiada data untuk disimpan.');
-                return;
-            }
-            
             showNotification('Menyimpan ke cloud...');
             
             try {
+                // Enforce all limits before syncing
+                enforceCloudLimits();
+                
+                // Sync all data types
                 await Promise.all([
                     syncHistoryToCloud(),
-                    syncChatToCloud()
+                    syncChatToCloud(),
+                    syncSessionsToCloud(),
+                    syncFilesToCloud(),
+                    syncSettingsToCloud()
                 ]);
-                showNotification('Semua data berjaya disimpan ke cloud!');
+                
+                // Show usage summary
+                const usage = estimateCloudUsage();
+                showNotification(`Data disimpan! Anggaran saiz: ${usage.totalKB}KB (${usage.fileCount} fail, ${usage.sessionCount} sesi)`);
             } catch (error) {
                 console.error('Manual sync error:', error);
                 showNotification('Ralat menyimpan ke cloud. Cuba lagi.');
             }
+        }
+        
+        // Estimate cloud usage for display
+        function estimateCloudUsage() {
+            const filesSize = JSON.stringify(workspaceFiles).length;
+            const sessionsSize = JSON.stringify(chatSessions).length;
+            const historySize = JSON.stringify(promptHistory).length;
+            const chatSize = JSON.stringify(chatHistory).length;
+            const totalBytes = filesSize + sessionsSize + historySize + chatSize;
+            
+            return {
+                fileCount: Object.keys(workspaceFiles).length,
+                sessionCount: chatSessions.length,
+                historyCount: promptHistory.length,
+                messageCount: chatHistory.length,
+                totalBytes: totalBytes,
+                totalKB: Math.round(totalBytes / 1024),
+                totalMB: (totalBytes / (1024 * 1024)).toFixed(2),
+                filesKB: Math.round(filesSize / 1024),
+                sessionsKB: Math.round(sessionsSize / 1024),
+                historyKB: Math.round(historySize / 1024),
+                chatKB: Math.round(chatSize / 1024)
+            };
         }
 
         async function loadFromCloud() {
@@ -2173,16 +2353,16 @@ helloWorld();
             };
             
             promptHistory.unshift(entry); // Add to beginning
-            if (promptHistory.length > 100) {
-                promptHistory = promptHistory.slice(0, 100); // Keep last 100
+            if (promptHistory.length > CLOUD_LIMITS.MAX_PROMPT_HISTORY) {
+                promptHistory = promptHistory.slice(0, CLOUD_LIMITS.MAX_PROMPT_HISTORY); // Keep last N
             }
             
             // Save locally
             localStorage.setItem(getUserKey('droidlink-prompt-history'), JSON.stringify(promptHistory));
             renderHistoryList();
             
-            // Sync to cloud
-            syncHistoryToCloud();
+            // Sync to cloud (debounced to save writes)
+            debouncedSyncToCloud(syncHistoryToCloud);
         }
 
         function renderHistoryList() {
@@ -3225,6 +3405,55 @@ helloWorld();
             const code = monacoEditor.getValue();
             document.getElementById('status-size').innerText = `${code.length} aksara`;
         }
+        
+        // ============================================
+        // CLOUD USAGE MONITOR
+        // ============================================
+        function showCloudUsage() {
+            const usage = estimateCloudUsage();
+            
+            // Update UI elements
+            document.getElementById('usage-files').textContent = `${usage.fileCount} fail (${usage.filesKB} KB)`;
+            document.getElementById('usage-sessions').textContent = `${usage.sessionCount} sesi (${usage.sessionsKB} KB)`;
+            document.getElementById('usage-history').textContent = `${usage.historyCount} item (${usage.historyKB} KB)`;
+            document.getElementById('usage-chat').textContent = `${usage.messageCount} mesej (${usage.chatKB} KB)`;
+            
+            const totalEl = document.getElementById('usage-total');
+            totalEl.textContent = `${usage.totalKB} KB (${usage.totalMB} MB)`;
+            
+            // Color code based on usage
+            if (usage.totalBytes > 500 * 1024) { // > 500KB
+                totalEl.className = 'text-red-400 font-medium';
+            } else if (usage.totalBytes > 200 * 1024) { // > 200KB
+                totalEl.className = 'text-yellow-400 font-medium';
+            } else {
+                totalEl.className = 'text-green-400 font-medium';
+            }
+            
+            // Show detailed breakdown
+            const breakdown = `
+Penggunaan Cloud Semasa:
+━━━━━━━━━━━━━━━━━━━━━━
+📁 Fail: ${usage.fileCount} (${usage.filesKB} KB)
+💬 Sesi: ${usage.sessionCount} (${usage.sessionsKB} KB)
+📝 Sejarah: ${usage.historyCount} (${usage.historyKB} KB)
+💭 Chat: ${usage.messageCount} (${usage.chatKB} KB)
+━━━━━━━━━━━━━━━━━━━━━━
+📊 JUMLAH: ${usage.totalKB} KB
+
+Had Spark Plan:
+• Storan: 1 GB (anda guna ${usage.totalMB} MB)
+• Baca: 50,000/hari
+• Tulis: 20,000/hari
+
+Tips Jimat:
+• Padam fail lama yang tidak digunakan
+• Kosongkan sesi chat lama
+• Gunakan butang Sync manual sahaja
+            `.trim();
+            
+            alert(breakdown);
+        }
 
         // ============================================
         // EDITOR ACTIONS
@@ -3594,8 +3823,8 @@ helloWorld();
                 console.warn('Failed to save chat conversation locally:', e);
             }
             
-            // Sync to cloud
-            syncChatToCloud();
+            // Sync to cloud (debounced to save writes)
+            debouncedSyncToCloud(syncChatToCloud);
         }
 
         async function loadChatConversation() {
@@ -3648,6 +3877,11 @@ helloWorld();
         function saveChatSession() {
             if (chatHistory.length === 0) return;
             
+            // Enforce message limit before saving
+            if (chatHistory.length > CLOUD_LIMITS.MAX_CHAT_MESSAGES) {
+                chatHistory = chatHistory.slice(-CLOUD_LIMITS.MAX_CHAT_MESSAGES);
+            }
+            
             const chatBox = document.getElementById('chat-history');
             const session = {
                 id: Date.now(),
@@ -3659,24 +3893,40 @@ helloWorld();
             };
             
             chatSessions.unshift(session);
-            if (chatSessions.length > 50) {
-                chatSessions = chatSessions.slice(0, 50);
+            if (chatSessions.length > CLOUD_LIMITS.MAX_CHAT_SESSIONS) {
+                chatSessions = chatSessions.slice(0, CLOUD_LIMITS.MAX_CHAT_SESSIONS);
             }
             
             localStorage.setItem(getUserKey('droidlink-chat-sessions'), JSON.stringify(chatSessions));
-            syncSessionsToCloud();
+            // Don't auto-sync sessions - let user manually sync or sync on login
+            // syncSessionsToCloud();
         }
 
         async function syncSessionsToCloud() {
             if (!firestoreDb || !currentUser) return;
             
+            // Enforce limits
+            if (chatSessions.length > CLOUD_LIMITS.MAX_CHAT_SESSIONS) {
+                chatSessions = chatSessions.slice(0, CLOUD_LIMITS.MAX_CHAT_SESSIONS);
+            }
+            
+            // Strip HTML from sessions to save space
+            const lightweightSessions = chatSessions.map(session => ({
+                id: session.id,
+                title: session.title,
+                history: session.history,
+                textPreview: stripHtmlForCloud(session.html).substring(0, 2000),
+                timestamp: session.timestamp,
+                mode: session.mode
+            }));
+            
             try {
                 const userRef = firestoreDb.collection('users').doc(currentUser.uid);
                 await userRef.set({
-                    chatSessions: chatSessions,
+                    chatSessions: lightweightSessions,
                     lastSessionSync: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-                console.log('Sessions synced to cloud');
+                console.log('Sessions synced to cloud (lightweight)');
             } catch (error) {
                 console.warn('Failed to sync sessions to cloud:', error);
             }
@@ -3805,10 +4055,38 @@ helloWorld();
         // CHAT MANAGEMENT (New, Close, Delete)
         // ============================================
         
+        let isNewChatInProgress = false;
+        let isFileOperationInProgress = false;
+        
         function newChat() {
+            // Set flag to prevent real-time sync from overwriting
+            isNewChatInProgress = true;
+            
             // Save current chat to sessions if it has content
             if (chatHistory.length > 0) {
                 saveChatSession();
+            }
+            
+            // Clear cloud chat first
+            if (firestoreDb && currentUser) {
+                const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                userRef.set({
+                    chatConversation: {
+                        history: [],
+                        html: '',
+                        savedAt: new Date().toISOString()
+                    },
+                    lastSync: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true }).then(() => {
+                    console.log('Cloud chat cleared for new chat');
+                    // Reset flag after a short delay to allow local reset
+                    setTimeout(() => { isNewChatInProgress = false; }, 1000);
+                }).catch(e => {
+                    console.error('Failed to clear cloud chat:', e);
+                    isNewChatInProgress = false;
+                });
+            } else {
+                setTimeout(() => { isNewChatInProgress = false; }, 1000);
             }
             
             // Reset chat
@@ -3827,7 +4105,6 @@ helloWorld();
             localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
             tokenUsage = { prompt: 0, completion: 0, total: 0, requests: 0, model: tokenUsage.model };
             saveTokenUsage();
-            syncChatToCloud();
             showNotification('Perbualan baharu dimulakan!');
         }
         
@@ -3838,7 +4115,31 @@ helloWorld();
             }
             
             if (confirm('Tutup perbualan semasa? Perbualan akan disimpan ke sejarah sesi.')) {
+                // Set flag to prevent real-time sync from overwriting
+                isNewChatInProgress = true;
+                
                 saveChatSession();
+                
+                // Clear cloud chat
+                if (firestoreDb && currentUser) {
+                    const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                    userRef.set({
+                        chatConversation: {
+                            history: [],
+                            html: '',
+                            savedAt: new Date().toISOString()
+                        },
+                        lastSync: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true }).then(() => {
+                        console.log('Cloud chat cleared for close chat');
+                        setTimeout(() => { isNewChatInProgress = false; }, 1000);
+                    }).catch(e => {
+                        console.error('Failed to clear cloud chat:', e);
+                        isNewChatInProgress = false;
+                    });
+                } else {
+                    setTimeout(() => { isNewChatInProgress = false; }, 1000);
+                }
                 
                 const chatBox = document.getElementById('chat-history');
                 chatBox.innerHTML = `
@@ -3853,7 +4154,6 @@ helloWorld();
                 `;
                 chatHistory = [];
                 localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
-                syncChatToCloud();
                 showNotification('Perbualan ditutup dan disimpan ke sejarah!');
             }
         }
@@ -3875,9 +4175,33 @@ helloWorld();
         
         function clearChat() {
             if (confirm('Adakah anda pasti mahu mengosongkan chat semasa? Perbualan akan disimpan ke sejarah.')) {
+                // Set flag to prevent real-time sync from overwriting
+                isNewChatInProgress = true;
+                
                 // Save to sessions before clearing
                 if (chatHistory.length > 0) {
                     saveChatSession();
+                }
+                
+                // Clear cloud chat
+                if (firestoreDb && currentUser) {
+                    const userRef = firestoreDb.collection('users').doc(currentUser.uid);
+                    userRef.set({
+                        chatConversation: {
+                            history: [],
+                            html: '',
+                            savedAt: new Date().toISOString()
+                        },
+                        lastSync: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true }).then(() => {
+                        console.log('Cloud chat cleared for clear chat');
+                        setTimeout(() => { isNewChatInProgress = false; }, 1000);
+                    }).catch(e => {
+                        console.error('Failed to clear cloud chat:', e);
+                        isNewChatInProgress = false;
+                    });
+                } else {
+                    setTimeout(() => { isNewChatInProgress = false; }, 1000);
                 }
                 
                 const chatBox = document.getElementById('chat-history');
@@ -3895,7 +4219,6 @@ helloWorld();
                 localStorage.removeItem(getUserKey('droidlink-chat-conversation'));
                 tokenUsage = { prompt: 0, completion: 0, total: 0, requests: 0, model: tokenUsage.model };
                 saveTokenUsage();
-                syncChatToCloud(); // Clear cloud too
                 showNotification('Chat dikosongkan dan disimpan ke sejarah!');
             }
         }
